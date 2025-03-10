@@ -1,0 +1,81 @@
+llm:
+  executive_agent: "claude-3-7-sonnet"
+  manager_agents: "gpt-4o"
+  task_agents: "gpt-4o-mini"
+  api_keys:
+    claude: "${CLAUDE_API_KEY}"
+    openai: "${OPENAI_API_KEY}"
+
+agent_system:
+  logging_level: "INFO"
+  max_workflow_steps: 10
+  default_timeout_seconds: 30
+  cache_enabled: true
+  cache_ttl_seconds: 300
+
+agents:
+  executive:
+    system_prompt_path: "config/prompts/executive_agent.txt"
+    max_tokens: 4000
+    temperature: 0.2
+  
+  manager:
+    customer_relations:
+      system_prompt_path: "config/prompts/customer_relations_agent.txt"
+      max_tokens: 2000
+      temperature: 0.3
+    
+    service_operations:
+      system_prompt_path: "config/prompts/service_operations_agent.txt"
+      max_tokens: 2000
+      temperature: 0.3
+    
+    financial_operations:
+      system_prompt_path: "config/prompts/financial_operations_agent.txt"
+      max_tokens: 2000
+      temperature: 0.3
+    
+    marketing:
+      system_prompt_path: "config/prompts/marketing_agent.txt"
+      max_tokens: 2000
+      temperature: 0.3
+    
+    administrative:
+      system_prompt_path: "config/prompts/administrative_agent.txt"
+      max_tokens: 2000
+      temperature: 0.3
+  
+  task:
+    default:
+      max_tokens: 1000
+      temperature: 0.1
+
+database:
+  postgres:
+    host: "${POSTGRES_HOST}"
+    port: 5432
+    database: "${POSTGRES_DB}"
+    user: "${POSTGRES_USER}"
+    password: "${POSTGRES_PASSWORD}"
+  
+  mongodb:
+    uri: "${MONGO_URI}"
+    database: "openmanus"
+  
+  redis:
+    host: "${REDIS_HOST}"
+    port: 6379
+    db: 0
+
+integrations:
+  ghl:
+    enabled: true
+    api_key: "${GHL_API_KEY}"
+    location_id: "${GHL_LOCATION_ID}"
+    base_url: "https://rest.gohighlevel.com"
+    
+  kickserv:
+    enabled: true
+    api_token: "${KICKSERV_API_TOKEN}"
+    account_slug: "${KICKSERV_ACCOUNT_SLUG}"
+    base_url: "https://app.kickserv.com" 

@@ -1,0 +1,14 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: openmanus-config
+  namespace: openmanus-production
+data:
+  environment: "production"
+  log_level: "INFO"
+  api_url: "https://api.openmanus.io"
+  max_workers: "10"
+  debug: "false"
+  cors_origins: "https://openmanus.io,https://app.openmanus.io"
+  allow_agent_system: "true"
+  agent_max_concurrent_tasks: "5" 

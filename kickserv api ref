@@ -1,0 +1,154 @@
+Swagger UX
+swagger
+/api-def
+Explore
+Kickserv API
+ 1.0 
+/api-def
+Developer API
+API access is available to premium plans only.
+
+We provide our API for use by your own internal or external development team. Kickserv cannot assist with implementation or development of your applications.
+
+This documentation refers to version 1 of the Kickserv Public API.
+
+Introduction
+The Kickserv API is implemented via XML over HTTP in a RESTful manner. The following resources are available through the API:
+
+Authentication
+Authentication is performed via HTTP Basic Authentication using an employee’s API token.
+This API token must be passed on every API call.
+An employee’s unique API token can be found in the employee management section of your Kickserv account.
+An API token should be treated like your normal Kickserv password. Changing your password will also change your API token.
+All URLs must include the account_slug
+Every request includes the account slug (previously known as subdomain) for your account. You may be able to see it in the address bar in this browser tab as well.
+
+Recently, Kickserv changed from using a subdomain-based URL to an account slug URL:
+
+OLD https://SUBDOMAIN.kickservapp.com/dashboard
+NEW https://app.kickserv.com/ACCOUNT_SLUG/dashboard
+The account_slug is the same as the subdomain you used to use. For example in the old scheme:
+
+https://franks.kickservapp.com/jobs
+“franks” was the subdomain, so in the new scheme, the account slug would be “franks” as well and is used like so:
+
+https://app.kickserv.com/franks/jobs
+Exploring the API through curl
+Curl is a simple command line tool that is perfect for quickly exploring the API.
+
+Example:
+
+curl -u TOKEN:TOKEN https://app.kickserv.com/ACCOUNT_SLUG/customers.xml
+Using this page
+Before you can try the examples on this page, you’ll need to authenticate using your API token.
+
+If you came here from your profile page, the API token was next to the link to this page. Copy your token, then click the green Authorize button immediately below this paragraph. Paste the API key into both username and password fields, and click the Authorize button to submit the form.
+
+Once you’re authenticated, you can try out any API call right on this page. Click on the row of the one you want, and it will expand to show the details of the call. Enter some parameters and click the “Try it out” button.
+
+Authorize
+default
+
+GET
+/{account_slug}/customers.xml
+
+POST
+/{account_slug}/customers.xml
+
+GET
+/{account_slug}/customers/{customer_number}.xml
+
+PATCH
+/{account_slug}/customers/{customer_number}.xml
+
+DELETE
+/{account_slug}/customers/{customer_number}.xml
+
+GET
+/{account_slug}/customers/{customer_number}/notes.xml
+
+POST
+/{account_slug}/customers/{customer_number}/notes.xml
+
+GET
+/{account_slug}/customers/{customer_number}/notes/{note_id}.xml
+
+PATCH
+/{account_slug}/customers/{customer_number}/notes/{note_id}.xml
+
+DELETE
+/{account_slug}/customers/{customer_number}/notes/{note_id}.xml
+
+GET
+/{account_slug}/jobs/{job_number}/notes.xml
+
+POST
+/{account_slug}/jobs/{job_number}/notes.xml
+
+GET
+/{account_slug}/jobs/{job_number}/notes/{note_id}.xml
+
+PATCH
+/{account_slug}/jobs/{job_number}/notes/{note_id}.xml
+
+DELETE
+/{account_slug}/jobs/{job_number}/notes/{note_id}.xml
+
+GET
+/{account_slug}/employees.xml
+
+POST
+/{account_slug}/employees.xml
+
+GET
+/{account_slug}/employees/{employee_number}.xml
+
+PATCH
+/{account_slug}/employees/{employee_number}.xml
+
+GET
+/{account_slug}/items.xml
+
+GET
+/{account_slug}/jobs.xml
+
+POST
+/{account_slug}/jobs.xml
+
+GET
+/{account_slug}/jobs/{job_number}.xml
+
+PATCH
+/{account_slug}/jobs/{job_number}.xml
+
+DELETE
+/{account_slug}/jobs/{job_number}.xml
+
+POST
+/{account_slug}/jobs/{job_number}/job_charges.xml
+
+POST
+/{account_slug}/tasks.xml
+GET
+/{account_slug}/tasks/{task_id}.xml
+
+PATCH
+/{account_slug}/tasks/{task_id}.xml
+
+DELETE
+/{account_slug}/tasks/{task_id}.xml
+
+GET
+/{account_slug}/jobs/{job_number}/time_entries.xml
+
+POST
+/{account_slug}/jobs/{job_number}/time_entries.xml
+
+GET
+/{account_slug}/jobs/{job_number}/time_entries/{time_entry_id}.xml
+
+PATCH
+/{account_slug}/jobs/{job_number}/time_entries/{time_entry_id}.xml
+
+DELETE
+/{account_slug}/jobs/{job_number}/time_entries/{time_entry_id}.xml

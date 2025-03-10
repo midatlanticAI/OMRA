@@ -1,0 +1,5008 @@
+# Technical Implementation Guide: Hierarchical AI Agent System for Appliance Repair Business
+Table of Contents
+System Architecture Overview
+Agent Hierarchy & Responsibilities
+Database Schema Design
+API Interfaces & Endpoints
+Core Implementation Classes
+User Interface Development
+Third-Party Integrations
+Deployment Instructions
+System Architecture Overview
+The system follows a multi-tier architecture with these primary components:
+┌───────────────────────────────────────────┐
+│              Frontend Layer               │
+│  (React SPA with Material UI Components)  │
+└─────────────────────┬─────────────────────┘
+                      │
+┌─────────────────────┼─────────────────────┐
+│              API Gateway Layer            │
+│ (FastAPI with JWT Authentication & Redis) │
+└─────────────────────┬─────────────────────┘
+                      │
+┌─────────────────────┼─────────────────────┐
+│             Agent Orchestration           │
+│        (Manages Agent Communication)      │
+└─────────┬───────────┼───────────┬─────────┘
+          │           │           │
+┌─────────▼───┐ ┌─────▼─────┐ ┌───▼─────────┐
+│  LLM API    │ │  Database │ │ Integration │
+│ Connectors  │ │  Layer    │ │ Connectors  │
+└─────────────┘ └───────────┘ └─────────────┘
+Key Components:
+Agent Orchestration Engine: Central system managing agent lifecycle and communication
+LLM Connector Service: Handles API calls to Claude, GPT-4o, and GPT-4o-mini
+Database Layer: PostgreSQL for structured data and MongoDB for conversation storage
+Redis Cache: For session management and rapid data retrieval
+Message Queue: RabbitMQ for asynchronous agent communication
+API Gateway: FastAPI implementation with rate limiting and authentication
+Frontend: React application with responsive design using Material UI
+Agent Hierarchy & Responsibilities
+Executive Agent (Claude 3.7 Sonnet)
+The primary reasoning and orchestration agent responsible for:
+Strategic planning and task delegation
+Complex analysis and decision making
+Cross-agent coordination
+Final response synthesis and verification
+Manager-Level Agents (GPT-4o)
+1. Customer Relations Manager Agent
+Purpose: Handle all customer interactions and relationship management
+Sub-Agents:
+Communication Agent: Manages emails, SMS, and notifications (GPT-4o-mini)
+Customer History Agent: Analyzes past interactions and service records (GPT-4o-mini)
+Satisfaction Analysis Agent: Processes feedback and identifies improvement opportunities (GPT-4o-mini)
+2. Service Operations Manager Agent
+Purpose: Coordinate technical repair operations and technician scheduling
+Sub-Agents:
+Appointment Scheduling Agent: Manages calendar and optimizes technician assignments (GPT-4o-mini)
+Repair Diagnosis Agent: Provides technical troubleshooting guidance (GPT-4o)
+Parts Inventory Agent: Tracks inventory and recommends ordering (GPT-4o-mini)
+3. Financial Operations Manager Agent
+Purpose: Handle all financial aspects of the business
+Sub-Agents:
+Invoice Generation Agent: Creates and manages customer invoices (GPT-4o-mini)
+Payment Processing Agent: Handles payments and refunds (GPT-4o-mini)
+Financial Reporting Agent: Generates financial reports and analyses (GPT-4o-mini)
+4. Marketing & Business Development Manager Agent
+Purpose: Drive business growth through marketing and customer acquisition
+Sub-Agents:
+Content Creation Agent: Generates marketing content and blog posts (GPT-4o)
+Social Media Agent: Manages social media presence and engagement (GPT-4o-mini)
+Lead Generation Agent: Identifies potential customers and follow-up strategies (GPT-4o-mini)
+5. Administrative Manager Agent
+Purpose: Handle internal business operations and documentation
+Sub-Agents:
+Document Management Agent: Organizes and retrieves business documents (GPT-4o-mini)
+HR Support Agent: Assists with scheduling, time-off requests, and employee onboarding (GPT-4o-mini)
+Compliance Agent: Ensures business practices meet industry regulations (GPT-4o)
+Database Schema Design
+The system uses PostgreSQL for relational data and MongoDB for conversation storage.
+PostgreSQL Schema
+Customers Table
+CREATE TABLE customers (
+    id SERIAL PRIMARY KEY,
+    first_name VARCHAR(100) NOT NULL,
+    last_name VARCHAR(100) NOT NULL,
+    email VARCHAR(255) UNIQUE NOT NULL,
+    phone VARCHAR(20),
+    address_line1 VARCHAR(255),
+    address_line2 VARCHAR(255),
+    city VARCHAR(100),
+    state VARCHAR(50),
+    zip VARCHAR(20),
+    notes TEXT,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+Appliances Table
+CREATE TABLE appliances (
+    id SERIAL PRIMARY KEY,
+    customer_id INTEGER REFERENCES customers(id),
+    type VARCHAR(50) NOT NULL,
+    brand VARCHAR(100),
+    model VARCHAR(100),
+    serial_number VARCHAR(100),
+    purchase_date DATE,
+    warranty_expiration DATE,
+    notes TEXT,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+Service Requests Table
+CREATE TABLE service_requests (
+    id SERIAL PRIMARY KEY,
+    customer_id INTEGER REFERENCES customers(id),
+    appliance_id INTEGER REFERENCES appliances(id),
+    status VARCHAR(50) NOT NULL,
+    priority VARCHAR(20) NOT NULL,
+    issue_description TEXT NOT NULL,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+Technicians Table
+CREATE TABLE technicians (
+    id SERIAL PRIMARY KEY,
+    first_name VARCHAR(100) NOT NULL,
+    last_name VARCHAR(100) NOT NULL,
+    email VARCHAR(255) UNIQUE NOT NULL,
+    phone VARCHAR(20),
+    specializations TEXT[],
+    availability_schedule JSONB,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+Appointments Table
+CREATE TABLE appointments (
+    id SERIAL PRIMARY KEY,
+    service_request_id INTEGER REFERENCES service_requests(id),
+    technician_id INTEGER REFERENCES technicians(id),
+    start_time TIMESTAMP NOT NULL,
+    end_time TIMESTAMP NOT NULL,
+    status VARCHAR(50) NOT NULL,
+    notes TEXT,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+Invoices Table
+CREATE TABLE invoices (
+    id SERIAL PRIMARY KEY,
+    service_request_id INTEGER REFERENCES service_requests(id),
+    amount DECIMAL(10,2) NOT NULL,
+    tax_amount DECIMAL(10,2) NOT NULL,
+    total_amount DECIMAL(10,2) NOT NULL,
+    status VARCHAR(50) NOT NULL,
+    issued_date DATE NOT NULL,
+    due_date DATE NOT NULL,
+    payment_method VARCHAR(50),
+    payment_date DATE,
+    notes TEXT,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+Parts Table
+CREATE TABLE parts (
+    id SERIAL PRIMARY KEY,
+    name VARCHAR(255) NOT NULL,
+    description TEXT,
+    part_number VARCHAR(100) UNIQUE NOT NULL,
+    compatible_appliances TEXT[],
+    cost DECIMAL(10,2) NOT NULL,
+    price DECIMAL(10,2) NOT NULL,
+    inventory_count INTEGER NOT NULL,
+    reorder_threshold INTEGER NOT NULL,
+    supplier VARCHAR(255),
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+Parts Used Table
+CREATE TABLE parts_used (
+    id SERIAL PRIMARY KEY,
+    service_request_id INTEGER REFERENCES service_requests(id),
+    part_id INTEGER REFERENCES parts(id),
+    quantity INTEGER NOT NULL,
+    price_charged DECIMAL(10,2) NOT NULL,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+MongoDB Collections
+Conversations Collection
+{
+  _id: ObjectId,
+  customer_id: Number,
+  service_request_id: Number,
+  agent_workflows: [
+    {
+      workflow_id: String,
+      initiated_by: String,
+      start_time: Date,
+      end_time: Date,
+      status: String,
+      agent_hierarchy: Object
+    }
+  ],
+  messages: [
+    {
+      timestamp: Date,
+      sender_type: String,
+      sender_id: String,
+      recipient_type: String,
+      recipient_id: String,
+      content: String,
+      attachments: Array,
+      metadata: Object
+    }
+  ],
+  tags: Array,
+  sentiment_analysis: Object,
+  created_at: Date,
+  updated_at: Date
+}
+Agent Logs Collection
+{
+  _id: ObjectId,
+  agent_id: String,
+  agent_type: String,
+  action: String,
+  input_data: Object,
+  output_data: Object,
+  error: Object,
+  execution_time_ms: Number,
+  token_usage: {
+    prompt_tokens: Number,
+    completion_tokens: Number,
+    total_tokens: Number
+  },
+  timestamp: Date
+}
+API Interfaces & Endpoints
+Authentication & Authorization
+User Authentication
+POST /api/auth/login: User login
+POST /api/auth/refresh: Refresh access token
+POST /api/auth/logout: User logout
+API Keys Management
+GET /api/auth/api-keys: List API keys
+POST /api/auth/api-keys: Create new API key
+DELETE /api/auth/api-keys/{key_id}: Delete API key
+Customer Management
+GET /api/customers: List customers
+GET /api/customers/{id}: Get customer details
+POST /api/customers: Create customer
+PUT /api/customers/{id}: Update customer
+DELETE /api/customers/{id}: Delete customer
+GET /api/customers/{id}/appliances: List customer appliances
+GET /api/customers/{id}/service-requests: List customer service requests
+GET /api/customers/{id}/invoices: List customer invoices
+Service Management
+GET /api/service-requests: List service requests
+GET /api/service-requests/{id}: Get service request details
+POST /api/service-requests: Create service request
+PUT /api/service-requests/{id}: Update service request
+DELETE /api/service-requests/{id}: Delete service request
+GET /api/service-requests/{id}/appointments: List appointments for service request
+GET /api/service-requests/{id}/notes: List notes for service request
+POST /api/service-requests/{id}/notes: Add note to service request
+Appointment Management
+GET /api/appointments: List appointments
+GET /api/appointments/{id}: Get appointment details
+POST /api/appointments: Create appointment
+PUT /api/appointments/{id}: Update appointment
+DELETE /api/appointments/{id}: Delete appointment
+POST /api/appointments/{id}/confirm: Confirm appointment
+POST /api/appointments/{id}/cancel: Cancel appointment
+POST /api/appointments/{id}/reschedule: Reschedule appointment
+Inventory Management
+GET /api/parts: List parts
+GET /api/parts/{id}: Get part details
+POST /api/parts: Create part
+PUT /api/parts/{id}: Update part
+DELETE /api/parts/{id}: Delete part
+GET /api/parts/low-stock: List parts with low stock
+POST /api/parts/{id}/adjust-stock: Adjust part stock level
+Financial Management
+GET /api/invoices: List invoices
+GET /api/invoices/{id}: Get invoice details
+POST /api/invoices: Create invoice
+PUT /api/invoices/{id}: Update invoice
+DELETE /api/invoices/{id}: Delete invoice
+POST /api/invoices/{id}/send: Send invoice to customer
+POST /api/invoices/{id}/mark-paid: Mark invoice as paid
+GET /api/financial/summary: Get financial summary
+GET /api/financial/reports: Generate financial reports
+Agent System
+POST /api/agents/executive: Send request to executive agent
+GET /api/agents/workflows: List agent workflows
+GET /api/agents/workflows/{id}: Get workflow details
+POST /api/agents/workflows/{id}/cancel: Cancel workflow
+GET /api/agents/logs: Get agent system logs
+GHL Integration
+GET /api/integrations/ghl/contacts: Sync contacts with GHL
+POST /api/integrations/ghl/opportunities: Create opportunity in GHL
+GET /api/integrations/ghl/tasks: List tasks from GHL
+POST /api/integrations/ghl/appointments: Create appointment in GHL
+Core Implementation Classes
+Agent System Core
+class AgentSystem:
+    """Core system for managing agent lifecycle and communication"""
+    
+    def __init__(self, config_path: str):
+        self.config = self._load_config(config_path)
+        self.executive_agent = None
+        self.manager_agents = {}
+        self.task_agents = {}
+        self.active_workflows = {}
+        self.llm_connector = LLMConnector(self.config["llm"])
+        self.db_connector = DatabaseConnector(self.config["database"])
+        self.integration_manager = IntegrationManager(self.config["integrations"])
+        self.logger = Logger(self.config["logging"])
+        
+    def _load_config(self, config_path: str) -> dict:
+        """Load configuration from file"""
+        import yaml
+        with open(config_path, 'r') as file:
+            return yaml.safe_load(file)
+            
+    def initialize(self):
+        """Initialize the agent system"""
+        self.logger.info("Initializing agent system")
+        self._initialize_executive_agent()
+        self._initialize_manager_agents()
+        self._initialize_task_agents()
+        self._connect_integrations()
+        self.logger.info("Agent system initialized successfully")
+        
+    def _initialize_executive_agent(self):
+        """Initialize the executive agent"""
+        self.logger.info("Initializing executive agent")
+        self.executive_agent = ExecutiveAgent(
+            self.llm_connector,
+            self.config["executive_agent"]
+        )
+        
+    def _initialize_manager_agents(self):
+        """Initialize manager-level agents"""
+        self.logger.info("Initializing manager agents")
+        
+        # Create manager agents
+        self.manager_agents["customer_relations"] = CustomerRelationsAgent(
+            self.llm_connector,
+            self.config["manager_agents"]["customer_relations"]
+        )
+        
+        self.manager_agents["service_operations"] = ServiceOperationsAgent(
+            self.llm_connector,
+            self.config["manager_agents"]["service_operations"]
+        )
+        
+        self.manager_agents["financial_operations"] = FinancialOperationsAgent(
+            self.llm_connector,
+            self.config["manager_agents"]["financial_operations"]
+        )
+        
+        self.manager_agents["marketing"] = MarketingAgent(
+            self.llm_connector,
+            self.config["manager_agents"]["marketing"]
+        )
+        
+        self.manager_agents["administrative"] = AdministrativeAgent(
+            self.llm_connector,
+            self.config["manager_agents"]["administrative"]
+        )
+        
+    def _initialize_task_agents(self):
+        """Initialize task-specific agents"""
+        self.logger.info("Initializing task agents")
+        
+        # Initialize task agents for each manager
+        for manager_name, manager_agent in self.manager_agents.items():
+            manager_agent.initialize_task_agents(self.llm_connector)
+            
+    def _connect_integrations(self):
+        """Connect to third-party integrations"""
+        self.logger.info("Connecting integrations")
+        self.integration_manager.connect_all()
+        
+    async def process_request(self, request: dict) -> dict:
+        """Process an incoming request through the agent system"""
+        self.logger.info(f"Processing request: {request['id']}")
+        
+        # Create a new workflow for this request
+        workflow_id = f"workflow_{request['id']}"
+        self.active_workflows[workflow_id] = {
+            "id": workflow_id,
+            "status": "initiated",
+            "request": request,
+            "steps": [],
+            "started_at": self._get_timestamp(),
+            "completed_at": None,
+            "response": None
+        }
+        
+        try:
+            # Send to executive agent for planning
+            workflow_plan = await self.executive_agent.analyze_request(request)
+            
+            # Update workflow with plan
+            self.active_workflows[workflow_id]["plan"] = workflow_plan
+            self.active_workflows[workflow_id]["status"] = "planned"
+            
+            # Execute the workflow steps
+            for step in workflow_plan["steps"]:
+                step_result = await self._execute_workflow_step(workflow_id, step)
+                self.active_workflows[workflow_id]["steps"].append(step_result)
+                
+            # Synthesize final response
+            final_response = await self.executive_agent.synthesize_response(
+                request,
+                self.active_workflows[workflow_id]
+            )
+            
+            # Update workflow with response
+            self.active_workflows[workflow_id]["response"] = final_response
+            self.active_workflows[workflow_id]["status"] = "completed"
+            self.active_workflows[workflow_id]["completed_at"] = self._get_timestamp()
+            
+            return {
+                "workflow_id": workflow_id,
+                "status": "completed",
+                "response": final_response
+            }
+            
+        except Exception as e:
+            self.logger.error(f"Error processing workflow {workflow_id}: {str(e)}")
+            self.active_workflows[workflow_id]["status"] = "failed"
+            self.active_workflows[workflow_id]["error"] = str(e)
+            
+            return {
+                "workflow_id": workflow_id,
+                "status": "failed",
+                "error": str(e)
+            }
+    
+    async def _execute_workflow_step(self, workflow_id: str, step: dict) -> dict:
+        """Execute a single step in a workflow"""
+        workflow = self.active_workflows[workflow_id]
+        step_id = f"{workflow_id}_step_{len(workflow['steps']) + 1}"
+        
+        self.logger.info(f"Executing step {step_id}: {step['type']}")
+        
+        step_result = {
+            "id": step_id,
+            "type": step["type"],
+            "status": "started",
+            "started_at": self._get_timestamp(),
+            "completed_at": None,
+            "result": None
+        }
+        
+        try:
+            if step["agent_type"] == "manager":
+                # Execute with manager agent
+                manager_agent = self.manager_agents[step["agent_name"]]
+                result = await manager_agent.execute_task(step["task"])
+                
+            elif step["agent_type"] == "task":
+                # Get the parent manager
+                manager_agent = self.manager_agents[step["manager"]]
+                # Execute with task agent
+                result = await manager_agent.execute_task_agent(
+                    step["agent_name"],
+                    step["task"]
+                )
+                
+            else:
+                raise ValueError(f"Unknown agent type: {step['agent_type']}")
+                
+            step_result["status"] = "completed"
+            step_result["completed_at"] = self._get_timestamp()
+            step_result["result"] = result
+            
+            return step_result
+            
+        except Exception as e:
+            self.logger.error(f"Error executing step {step_id}: {str(e)}")
+            step_result["status"] = "failed"
+            step_result["error"] = str(e)
+            return step_result
+    
+    def _get_timestamp(self) -> str:
+        """Get current timestamp string"""
+        from datetime import datetime
+        return datetime.now().isoformat()
+Executive Agent (Claude 3.7 Sonnet)
+class ExecutiveAgent:
+    """
+    Executive Agent powered by Claude 3.7 Sonnet
+    Responsible for high-level planning and coordination
+    """
+    
+    def __init__(self, llm_connector, config):
+        self.llm_connector = llm_connector
+        self.config = config
+        self.model = "claude-3-sonnet-20240229"
+        self.system_prompt = self._load_system_prompt()
+        
+    def _load_system_prompt(self) -> str:
+        """Load the system prompt for the executive agent"""
+        with open(self.config["system_prompt_path"], "r") as file:
+            return file.read()
+            
+    async def analyze_request(self, request: dict) -> dict:
+        """
+        Analyze a request and create a workflow plan
+        
+        Args:
+            request: The incoming request
+            
+        Returns:
+            A workflow plan with steps to execute
+        """
+        prompt = f"""
+        Analyze the following request and create a detailed workflow plan:
+        
+        REQUEST ID: {request.get('id', 'unknown')}
+        REQUEST TYPE: {request.get('type', 'unknown')}
+        USER: {request.get('user', 'unknown')}
+        CONTENT: {request.get('content', '')}
+        CONTEXT: {request.get('context', '{}')}
+        
+        Your task is to:
+        1. Determine the primary domain this request belongs to
+        2. Identify which manager agents should handle parts of this request
+        3. Break down the request into specific tasks for each agent
+        4. Define the sequence of steps needed to fulfill the request
+        5. Set priority levels for each step
+        
+        Output your analysis as a structured workflow plan in JSON format.
+        """
+        
+        response = await self.llm_connector.generate(
+            model=self.model,
+            prompt=prompt,
+            system_prompt=self.system_prompt,
+            max_tokens=4000,
+            temperature=0.2
+        )
+        
+        # Parse the workflow plan from the response
+        import json
+        try:
+            # Find JSON content in the response
+            workflow_plan = self._extract_json(response)
+            return workflow_plan
+        except Exception as e:
+            raise ValueError(f"Failed to parse workflow plan: {str(e)}")
+            
+    async def synthesize_response(self, request: dict, workflow: dict) -> dict:
+        """
+        Synthesize a final response based on workflow results
+        
+        Args:
+            request: The original request
+            workflow: The completed workflow with results
+            
+        Returns:
+            A formatted final response
+        """
+        # Prepare prompt with workflow results
+        steps_results = []
+        for step in workflow["steps"]:
+            step_info = {
+                "id": step["id"],
+                "type": step["type"],
+                "status": step["status"],
+                "result": step.get("result", "No result")
+            }
+            steps_results.append(step_info)
+            
+        prompt = f"""
+        Synthesize a comprehensive response based on the following workflow results:
+        
+        ORIGINAL REQUEST: {request.get('content', '')}
+        
+        WORKFLOW RESULTS:
+        {json.dumps(steps_results, indent=2)}
+        
+        Your task is to create a coherent and helpful response that:
+        1. Addresses all aspects of the original request
+        2. Integrates information from all workflow steps
+        3. Provides clear next actions or recommendations
+        4. Uses a professional but friendly tone
+        5. Is formatted appropriately for the user
+        
+        Generate a complete response that can be sent directly to the user.
+        """
+        
+        response = await self.llm_connector.generate(
+            model=self.model,
+            prompt=prompt,
+            system_prompt=self.system_prompt,
+            max_tokens=2000,
+            temperature=0.3
+        )
+        
+        return {
+            "content": response,
+            "format": "text"
+        }
+        
+    def _extract_json(self, text: str) -> dict:
+        """Extract JSON from text, handling various formats"""
+        import json
+        import re
+        
+        # Try to find JSON block
+        json_match = re.search(r'```(?:json)?\s*([\s\S]*?)\s*```', text)
+        if json_match:
+            json_str = json_match.group(1)
+            return json.loads(json_str)
+            
+        # Try to find JSON without markdown formatting
+        start_idx = text.find('{')
+        end_idx = text.rfind('}') + 1
+        
+        if start_idx >= 0 and end_idx > start_idx:
+            json_str = text[start_idx:end_idx]
+            return json.loads(json_str)
+            
+        # Try the whole text as JSON
+        return json.loads(text)
+Manager Agent Base Class
+class ManagerAgent:
+    """
+    Base class for manager-level agents
+    Uses GPT-4o for complex reasoning tasks
+    """
+    
+    def __init__(self, llm_connector, config):
+        self.llm_connector = llm_connector
+        self.config = config
+        self.model = "gpt-4o"
+        self.system_prompt = self._load_system_prompt()
+        self.task_agents = {}
+        
+    def _load_system_prompt(self) -> str:
+        """Load the system prompt for this agent"""
+        with open(self.config["system_prompt_path"], "r") as file:
+            return file.read()
+            
+    def initialize_task_agents(self, llm_connector):
+        """Initialize task agents for this manager"""
+        # To be implemented by subclasses
+        pass
+        
+    async def execute_task(self, task: dict) -> dict:
+        """
+        Execute a task assigned to this manager agent
+        
+        Args:
+            task: The task to execute
+            
+        Returns:
+            Results of the task execution
+        """
+        prompt = f"""
+        Execute the following task:
+        
+        TASK TYPE: {task.get('type', 'unknown')}
+        TASK DESCRIPTION: {task.get('description', '')}
+        TASK PARAMETERS: {json.dumps(task.get('parameters', {}), indent=2)}
+        TASK CONTEXT: {json.dumps(task.get('context', {}), indent=2)}
+        
+        Your task is to:
+        1. Analyze the requirements of this task
+        2. Determine the best approach to fulfill it
+        3. Execute the necessary steps
+        4. Return a structured result
+        
+        Output your result in JSON format.
+        """
+        
+        response = await self.llm_connector.generate(
+            model=self.model,
+            prompt=prompt,
+            system_prompt=self.system_prompt,
+            max_tokens=2000,
+            temperature=0.2
+        )
+        
+        # Parse the result from the response
+        try:
+            result = self._extract_json(response)
+            return result
+        except Exception as e:
+            raise ValueError(f"Failed to parse task result: {str(e)}")
+            
+    async def execute_task_agent(self, agent_name: str, task: dict) -> dict:
+        """
+        Execute a task using a specific task agent
+        
+        Args:
+            agent_name: Name of the task agent to use
+            task: The task to execute
+            
+        Returns:
+            Results of the task execution
+        """
+        if agent_name not in self.task_agents:
+            raise ValueError(f"Task agent not found: {agent_name}")
+            
+        return await self.task_agents[agent_name].execute_task(task)
+        
+    def _extract_json(self, text: str) -> dict:
+        """Extract JSON from text, handling various formats"""
+        import json
+        import re
+        
+        # Try to find JSON block
+        json_match = re.search(r'```(?:json)?\s*([\s\S]*?)\s*```', text)
+        if json_match:
+            json_str = json_match.group(1)
+            return json.loads(json_str)
+            
+        # Try to find JSON without markdown formatting
+        start_idx = text.find('{')
+        end_idx = text.rfind('}') + 1
+        
+        if start_idx >= 0 and end_idx > start_idx:
+            json_str = text[start_idx:end_idx]
+            return json.loads(json_str)
+            
+        # Try the whole text as JSON
+        return json.loads(text)
+Customer Relations Manager Agent Implementation
+class CustomerRelationsAgent(ManagerAgent):
+    """
+    Manager agent responsible for customer relationships
+    Handles customer interactions, history, and satisfaction
+    """
+    
+    def initialize_task_agents(self, llm_connector):
+        """Initialize task agents for customer relations"""
+        self.task_agents["communication"] = CommunicationAgent(
+            llm_connector,
+            self.config["task_agents"]["communication"]
+        )
+        
+        self.task_agents["customer_history"] = CustomerHistoryAgent(
+            llm_connector,
+            self.config["task_agents"]["customer_history"]
+        )
+        
+        self.task_agents["satisfaction_analysis"] = SatisfactionAnalysisAgent(
+            llm_connector,
+            self.config["task_agents"]["satisfaction_analysis"]
+        )
+        
+    async def handle_customer_inquiry(self, inquiry: dict) -> dict:
+        """
+        Handle a customer inquiry
+        
+        Args:
+            inquiry: Customer inquiry details
+            
+        Returns:
+            Response to the inquiry
+        """
+        # Get customer history
+        customer_history = await self.task_agents["customer_history"].get_customer_details(
+            inquiry["customer_id"]
+        )
+        
+        # Generate response
+        task = {
+            "type": "customer_inquiry",
+            "description": "Generate response to customer inquiry",
+            "parameters": {
+                "inquiry_text": inquiry["content"],
+                "customer_id": inquiry["customer_id"]
+            },
+            "context": {
+                "customer_history": customer_history,
+                "appliance_info": inquiry.get("appliance_info", {})
+            }
+        }
+        
+        return await self.execute_task(task)
+        
+    async def schedule_follow_up(self, service_request: dict) -> dict:
+        """
+        Schedule a follow-up for a service request
+        
+        Args:
+            service_request: Service request details
+            
+        Returns:
+            Follow-up details
+        """
+        # Create follow-up task
+        task = {
+            "type": "schedule_follow_up",
+            "description": "Schedule follow-up for service request",
+            "parameters": {
+                "service_request_id": service_request["id"],
+                "customer_id": service_request["customer_id"],
+                "follow_up_type": "post_service"
+            },
+            "context": {
+                "service_date": service_request.get("service_date"),
+                "technician": service_request.get("technician")
+            }
+        }
+        
+        return await self.execute_task(task)
+Task Agent Base Class
+class TaskAgent:
+    """
+    Base class for task-specific agents
+    Uses GPT-4o-mini for well-defined tasks
+    """
+    
+    def __init__(self, llm_connector, config):
+        self.llm_connector = llm_connector
+        self.config = config
+        self.model = "gpt-4o-mini"  # Default model, can be overridden
+        self.system_prompt = self._load_system_prompt()
+        
+    def _load_system_prompt(self) -> str:
+        """Load the system prompt for this agent"""
+        with open(self.config["system_prompt_path"], "r") as file:
+            return file.read()
+            
+    async def execute_task(self, task: dict) -> dict:
+        """
+        Execute a specific task
+        
+        Args:
+            task: The task to execute
+            
+        Returns:
+            Results of the task execution
+        """
+        prompt = f"""
+        Execute the following task:
+        
+        TASK TYPE: {task.get('type', 'unknown')}
+        TASK DESCRIPTION: {task.get('description', '')}
+        TASK PARAMETERS: {json.dumps(task.get('parameters', {}), indent=2)}
+        TASK CONTEXT: {json.dumps(task.get('context', {}), indent=2)}
+        
+        Provide your result in JSON format.
+        """
+        
+        response = await self.llm_connector.generate(
+            model=self.model,
+            prompt=prompt,
+            system_prompt=self.system_prompt,
+            max_tokens=1000,
+            temperature=0.1
+        )
+        
+        # Parse the result from the response
+        try:
+            result = self._extract_json(response)
+            return result
+        except Exception as e:
+            raise ValueError(f"Failed to parse task result: {str(e)}")
+            
+    def _extract_json(self, text: str) -> dict:
+        """Extract JSON from text, handling various formats"""
+        import json
+        import re
+        
+        # Try to find JSON block
+        json_match = re.search(r'```(?:json)?\s*([\s\S]*?)\s*```', text)
+        if json_match:
+            json_str = json_match.group(1)
+            return json.loads(json_str)
+            
+        # Try to find JSON without markdown formatting
+        start_idx = text.find('{')
+        end_idx = text.rfind('}') + 1
+        
+        if start_idx >= 0 and end_idx > start_idx:
+            json_str = text[start_idx:end_idx]
+            return json.loads(json_str)
+            
+        # Try the whole text as JSON
+        return json.loads(text)
+LLM Connector Implementation
+class LLMConnector:
+    """
+    Handles connections to different LLM APIs
+    Supports Claude, GPT-4o, and GPT-4o-mini
+    """
+    
+    def __init__(self, config):
+        self.config = config
+        self.claude_client = None
+        self.openai_client = None
+        self._initialize_clients()
+        
+    def _initialize_clients(self):
+        """Initialize API clients"""
+        # Initialize Claude client
+        if self.config.get("claude_api_key"):
+            import anthropic
+            self.claude_client = anthropic.Anthropic(
+                api_key=self.config["claude_api_key"]
+            )
+            
+        # Initialize OpenAI client
+        if self.config.get("openai_api_key"):
+            import openai
+            self.openai_client = openai.OpenAI(
+                api_key=self.config["openai_api_key"]
+            )
+    
+    async def generate(self, model: str, prompt: str, system_prompt: str = None,
+                      max_tokens: int = 1000, temperature: float = 0.7) -> str:
+        """
+        Generate text from LLM
+        
+        Args:
+            model: Model name (claude-3-sonnet, gpt-4o, gpt-4o-mini)
+            prompt: The prompt to send
+            system_prompt: Optional system prompt
+            max_tokens: Maximum tokens to generate
+            temperature: Temperature for generation
+            
+        Returns:
+            Generated text
+        """
+        if model.startswith("claude"):
+            return await self._generate_claude(
+                model, prompt, system_prompt, max_tokens, temperature
+            )
+        elif model.startswith("gpt"):
+            return await self._generate_openai(
+                model, prompt, system_prompt, max_tokens, temperature
+            )
+        else:
+            raise ValueError(f"Unsupported model: {model}")
+    
+    async def _generate_claude(self, model: str, prompt: str, system_prompt: str = None,
+                              max_tokens: int = 1000, temperature: float = 0.7) -> str:
+        """Generate text using Claude API"""
+        if not self.claude_client:
+            raise ValueError("Claude API client not initialized")
+            
+        # Create messages
+        messages = [{"role": "user", "content": prompt}]
+        
+        # Call Claude API
+        response = await self.claude_client.messages.create(
+            model=model,
+            max_tokens=max_tokens,
+            temperature=temperature,
+            system=system_prompt,
+            messages=messages
+        )
+        
+        return response.content[0].text
+    
+    async def _generate_openai(self, model: str, prompt: str, system_prompt: str = None,
+                              max_tokens: int = 1000, temperature: float = 0.7) -> str:
+        """Generate text using OpenAI API"""
+        if not self.openai_client:
+            raise ValueError("OpenAI API client not initialized")
+            
+        # Create messages
+        messages = []
+        if system_prompt:
+            messages.append({"role": "system", "content": system_prompt})
+        messages.append({"role": "user", "content": prompt})
+        
+        # Call OpenAI API
+        response = await self.openai_client.chat.completions.create(
+            model=model,
+            messages=messages,
+            max_tokens=max_tokens,
+            temperature=temperature
+        )
+        
+        return response.choices[0].message.content
+GHL Integration Connector
+class GHLConnector:
+    """
+    Connector for Go High Level CRM integration
+    Handles synchronization of customers, appointments, and tasks
+    """
+    
+    def __init__(self, config):
+        self.config = config
+        self.api_key = config["api_key"]
+        self.location_id = config["location_id"]
+        self.base_url = "https://services.leadconnectorhq.com"
+        self.headers = {
+            "Authorization": f"Bearer {self.api_key}",
+            "Version": "2021-04-15",
+            "Content-Type": "application/json"
+        }
+        
+    async def sync_contact(self, customer_data: dict) -> dict:
+        """
+        Sync a customer with GHL contact
+        
+        Args:
+            customer_data: Customer data to sync
+            
+        Returns:
+            GHL contact data
+        """
+        import aiohttp
+            async def sync_contact(self, customer_data: dict) -> dict:
+        """
+        Sync a customer with GHL contact
+        
+        Args:
+            customer_data: Customer data to sync
+            
+        Returns:
+            GHL contact data
+        """
+        import aiohttp
+        
+        # Prepare contact data for GHL format
+        contact_data = {
+            "firstName": customer_data.get("first_name", ""),
+            "lastName": customer_data.get("last_name", ""),
+            "email": customer_data.get("email", ""),
+            "phone": customer_data.get("phone", ""),
+            "address": {
+                "line1": customer_data.get("address_line1", ""),
+                "line2": customer_data.get("address_line2", ""),
+                "city": customer_data.get("city", ""),
+                "state": customer_data.get("state", ""),
+                "postalCode": customer_data.get("zip", ""),
+                "country": "US"  # Default, can be made configurable
+            },
+            "locationId": self.location_id,
+            "tags": ["Appliance Repair", "AI System"]
+        }
+        
+        # Check if customer has GHL ID
+        if "ghl_contact_id" in customer_data and customer_data["ghl_contact_id"]:
+            # Update existing contact
+            url = f"{self.base_url}/v1/contacts/{customer_data['ghl_contact_id']}"
+            method = "PUT"
+        else:
+            # Create new contact
+            url = f"{self.base_url}/v1/contacts"
+            method = "POST"
+        
+        async with aiohttp.ClientSession() as session:
+            async with session.request(
+                method, 
+                url, 
+                headers=self.headers, 
+                json=contact_data
+            ) as response:
+                if response.status not in (200, 201):
+                    error_text = await response.text()
+                    raise ValueError(f"GHL API error: {response.status} - {error_text}")
+                
+                result = await response.json()
+                return result
+                
+    async def create_opportunity(self, service_request: dict) -> dict:
+        """
+        Create an opportunity in GHL
+        
+        Args:
+            service_request: Service request data
+            
+        Returns:
+            GHL opportunity data
+        """
+        import aiohttp
+        
+        # Prepare opportunity data
+        opportunity_data = {
+            "name": f"Service Request #{service_request['id']} - {service_request.get('appliance_type', 'Appliance')} Repair",
+            "contactId": service_request.get("ghl_contact_id"),
+            "pipelineId": self.config["pipeline_id"],
+            "status": "open",
+            "monetaryValue": service_request.get("estimated_cost", 0),
+            "locationId": self.location_id,
+            "customFields": [
+                {
+                    "id": self.config["custom_fields"]["service_request_id"],
+                    "value": str(service_request["id"])
+                },
+                {
+                    "id": self.config["custom_fields"]["appliance_type"],
+                    "value": service_request.get("appliance_type", "")
+                },
+                {
+                    "id": self.config["custom_fields"]["issue_description"],
+                    "value": service_request.get("issue_description", "")
+                }
+            ]
+        }
+        
+        # Create opportunity
+        url = f"{self.base_url}/v1/opportunities"
+        
+        async with aiohttp.ClientSession() as session:
+            async with session.request(
+                "POST", 
+                url, 
+                headers=self.headers, 
+                json=opportunity_data
+            ) as response:
+                if response.status != 201:
+                    error_text = await response.text()
+                    raise ValueError(f"GHL API error: {response.status} - {error_text}")
+                
+                result = await response.json()
+                return result
+    
+    async def create_appointment(self, appointment_data: dict) -> dict:
+        """
+        Create an appointment in GHL
+        
+        Args:
+            appointment_data: Appointment data
+            
+        Returns:
+            GHL calendar event data
+        """
+        import aiohttp
+        from datetime import datetime, timedelta
+        
+        # Calculate end time
+        start_time = datetime.fromisoformat(appointment_data["start_time"])
+        duration_minutes = appointment_data.get("duration_minutes", 60)
+        end_time = start_time + timedelta(minutes=duration_minutes)
+        
+        # Prepare calendar event data
+        event_data = {
+            "title": f"Service Appointment - {appointment_data.get('service_type', 'Repair')}",
+            "description": appointment_data.get("notes", ""),
+            "start": start_time.isoformat(),
+            "end": end_time.isoformat(),
+            "contactId": appointment_data.get("ghl_contact_id"),
+            "locationId": self.location_id,
+            "calendarId": self.config["calendar_id"],
+            "allDay": False,
+            "isAllDayEvent": False,
+            "sendNotification": True
+        }
+        
+        # Create calendar event
+        url = f"{self.base_url}/v1/calendars/{self.config['calendar_id']}/events"
+        
+        async with aiohttp.ClientSession() as session:
+            async with session.request(
+                "POST", 
+                url, 
+                headers=self.headers, 
+                json=event_data
+            ) as response:
+                if response.status != 201:
+                    error_text = await response.text()
+                    raise ValueError(f"GHL API error: {response.status} - {error_text}")
+                
+                result = await response.json()
+                return result
+    
+    async def create_task(self, task_data: dict) -> dict:
+        """
+        Create a task in GHL
+        
+        Args:
+            task_data: Task data
+            
+        Returns:
+            GHL task data
+        """
+        import aiohttp
+        
+        # Prepare task data
+        ghl_task_data = {
+            "title": task_data.get("title", "New Task"),
+            "description": task_data.get("description", ""),
+            "dueDate": task_data.get("due_date"),
+            "assignedTo": task_data.get("assigned_to", self.config.get("default_assignee")),
+            "contactId": task_data.get("ghl_contact_id"),
+            "locationId": self.location_id,
+            "status": "pending"
+        }
+        
+        # Create task
+        url = f"{self.base_url}/v1/tasks"
+        
+        async with aiohttp.ClientSession() as session:
+            async with session.request(
+                "POST", 
+                url, 
+                headers=self.headers, 
+                json=ghl_task_data
+            ) as response:
+                if response.status != 201:
+                    error_text = await response.text()
+                    raise ValueError(f"GHL API error: {response.status} - {error_text}")
+                
+                result = await response.json()
+                return result
+
+
+
+FastAPI Implementation
+from fastapi import FastAPI, Depends, HTTPException, status
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.security import OAuth2PasswordBearer, OAuth2PasswordRequestForm
+from jose import JWTError, jwt
+from passlib.context import CryptContext
+import uvicorn
+from datetime import datetime, timedelta
+from typing import Optional, List
+import asyncio
+
+# Import our agent system
+from agent_system.core import AgentSystem
+
+# Initialize the application
+app = FastAPI(
+    title="OpenManus RepairAssist API",
+    description="API for OpenManus RepairAssist - AI Agent System for Appliance Repair Businesses",
+    version="1.0.0"
+)
+
+# Configure CORS
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],  # In production, set to specific origins
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+# Security setup
+SECRET_KEY = "YOUR_SECRET_KEY_HERE"  # In production, load from environment
+ALGORITHM = "HS256"
+ACCESS_TOKEN_EXPIRE_MINUTES = 30
+
+pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
+oauth2_scheme = OAuth2PasswordBearer(tokenUrl="token")
+
+# Initialize agent system
+agent_system = AgentSystem("config/agent_system.yaml")
+
+# Authentication functions
+def verify_password(plain_password, hashed_password):
+    return pwd_context.verify(plain_password, hashed_password)
+
+def get_password_hash(password):
+    return pwd_context.hash(password)
+
+def create_access_token(data: dict, expires_delta: Optional[timedelta] = None):
+    to_encode = data.copy()
+    if expires_delta:
+        expire = datetime.utcnow() + expires_delta
+    else:
+        expire = datetime.utcnow() + timedelta(minutes=15)
+    to_encode.update({"exp": expire})
+    encoded_jwt = jwt.encode(to_encode, SECRET_KEY, algorithm=ALGORITHM)
+    return encoded_jwt
+
+async def get_current_user(token: str = Depends(oauth2_scheme)):
+    credentials_exception = HTTPException(
+        status_code=status.HTTP_401_UNAUTHORIZED,
+        detail="Could not validate credentials",
+        headers={"WWW-Authenticate": "Bearer"},
+    )
+    try:
+        payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
+        username: str = payload.get("sub")
+        if username is None:
+            raise credentials_exception
+    except JWTError:
+        raise credentials_exception
+    
+    # In production, look up user in database
+    # For demo, hardcode a user
+    if username != "demo":
+        raise credentials_exception
+        
+    return {"username": username}
+
+# Authentication endpoint
+@app.post("/token", response_model=dict)
+async def login_for_access_token(form_data: OAuth2PasswordRequestForm = Depends()):
+    # In production, verify against database
+    # For demo, hardcode credentials
+    if form_data.username != "demo" or form_data.password != "demo1234":
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Incorrect username or password",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+    
+    access_token_expires = timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
+    access_token = create_access_token(
+        data={"sub": form_data.username}, expires_delta=access_token_expires
+    )
+    return {"access_token": access_token, "token_type": "bearer"}
+
+# Main agent endpoint
+@app.post("/api/agents/executive", response_model=dict)
+async def process_with_executive_agent(
+    request: dict,
+    current_user: dict = Depends(get_current_user)
+):
+    """
+    Process a request using the executive agent.
+    
+    This is the main entry point for all AI agent processing.
+    The executive agent will analyze the request and delegate to appropriate
+    manager and task agents.
+    """
+    try:
+        # Add request metadata
+        request["timestamp"] = datetime.now().isoformat()
+        request["user"] = current_user["username"]
+        
+        # Process with agent system
+        result = await agent_system.process_request(request)
+        return result
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Error processing request: {str(e)}"
+        )
+
+# Customer endpoints
+@app.get("/api/customers", response_model=List[dict])
+async def list_customers(
+    current_user: dict = Depends(get_current_user),
+    page: int = 1,
+    limit: int = 20
+):
+    """Get a list of customers"""
+    # In production, query from database
+    # For demo, return mock data
+    return [
+        {"id": 1, "first_name": "John", "last_name": "Doe", "email": "john@example.com"},
+        {"id": 2, "first_name": "Jane", "last_name": "Smith", "email": "jane@example.com"},
+    ]
+
+@app.post("/api/customers", response_model=dict)
+async def create_customer(
+    customer: dict,
+    current_user: dict = Depends(get_current_user)
+):
+    """Create a new customer"""
+    # In production, save to database
+    # For demo, return mock data
+    customer["id"] = 123
+    customer["created_at"] = datetime.now().isoformat()
+    return customer
+
+# GHL integration endpoints
+@app.post("/api/integrations/ghl/contacts", response_model=dict)
+async def sync_ghl_contact(
+    customer_id: int,
+    current_user: dict = Depends(get_current_user)
+):
+    """Sync a customer with GHL contacts"""
+    try:
+        # In production, get customer from database
+        # For demo, use mock data
+        customer_data = {
+            "id": customer_id,
+            "first_name": "John",
+            "last_name": "Doe",
+            "email": "john@example.com",
+            "phone": "123-456-7890",
+        }
+        
+        # Process with agent system
+        request = {
+            "id": f"ghl_sync_{customer_id}",
+            "type": "ghl_sync",
+            "content": "Sync customer with GHL",
+            "context": {
+                "customer_data": customer_data
+            }
+        }
+        
+        result = await agent_system.process_request(request)
+        return result
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Error syncing with GHL: {str(e)}"
+        )
+
+# Service request endpoints
+@app.post("/api/service-requests", response_model=dict)
+async def create_service_request(
+    service_request: dict,
+    current_user: dict = Depends(get_current_user)
+):
+    """Create a new service request"""
+    try:
+        # Process with agent system
+        request = {
+            "id": f"service_{datetime.now().strftime('%Y%m%d%H%M%S')}",
+            "type": "create_service_request",
+            "content": "Create service request",
+            "context": {
+                "service_request": service_request
+            }
+        }
+        
+        result = await agent_system.process_request(request)
+        return result
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Error creating service request: {str(e)}"
+        )
+
+# Main function to run the API
+def start_api():
+    uvicorn.run(app, host="0.0.0.0", port=8000)
+
+
+
+Kickserv integration 
+ Kickserv Integration Implementation
+Overview of Kickserv Integration
+Kickserv is a comprehensive field service management software that provides functionality for scheduling, dispatching, customer management, and invoicing. Integrating with Kickserv will allow our AI agent system to access and manipulate data in the appliance repair business's existing workflow system.
+Based on the latest documentation, Kickserv provides a RESTful API that implements XML over HTTP, with various endpoints for managing customers, jobs, employees, tasks, and other resources.
+Kickserv API Configuration
+# backend/integrations/kickserv/config.py
+from pydantic import BaseSettings
+
+class KickservSettings(BaseSettings):
+    """Kickserv API configuration settings."""
+    
+    API_TOKEN: str
+    ACCOUNT_SLUG: str
+    BASE_URL: str = "https://app.kickserv.com"
+    
+    class Config:
+        env_prefix = "KICKSERV_"
+        env_file = ".env"
+Kickserv API Client Implementation
+# backend/integrations/kickserv/client.py
+import requests
+import xml.etree.ElementTree as ET
+from typing import Dict, Any, Optional, List, Union
+import logging
+from .config import KickservSettings
+
+logger = logging.getLogger(__name__)
+
+class KickservClient:
+    """Client for interacting with the Kickserv API."""
+    
+    def __init__(self, settings: Optional[KickservSettings] = None):
+        """
+        Initialize the Kickserv API client.
+        
+        Args:
+            settings: Kickserv API settings (optional, will load from environment if not provided)
+        """
+        self.settings = settings or KickservSettings()
+        self.base_url = self.settings.BASE_URL
+        self.account_slug = self.settings.ACCOUNT_SLUG
+        self.auth = (self.settings.API_TOKEN, self.settings.API_TOKEN)
+        self.headers = {
+            'Content-Type': 'application/xml',
+            'Accept': 'application/xml'
+        }
+    
+    def _build_url(self, endpoint: str) -> str:
+        """
+        Build a full URL for the API request.
+        
+        Args:
+            endpoint: API endpoint path
+            
+        Returns:
+            Full URL for the API request
+        """
+        # Ensure endpoint starts with a slash
+        if not endpoint.startswith('/'):
+            endpoint = f"/{endpoint}"
+            
+        # Ensure endpoint starts with account_slug
+        if not endpoint.startswith(f"/{self.account_slug}"):
+            endpoint = f"/{self.account_slug}{endpoint}"
+            
+        return f"{self.base_url}{endpoint}"
+    
+    def _dict_to_xml(self, tag: str, data: Dict[str, Any]) -> str:
+        """
+        Convert a dictionary to XML string.
+        
+        Args:
+            tag: Root XML tag
+            data: Dictionary to convert
+            
+        Returns:
+            XML string
+        """
+        root = ET.Element(tag)
+        
+        def _add_element(parent, key, value):
+            if value is None:
+                return
+                
+            if isinstance(value, dict):
+                sub_elem = ET.SubElement(parent, key)
+                for k, v in value.items():
+                    _add_element(sub_elem, k, v)
+            elif isinstance(value, list):
+                for item in value:
+                    if isinstance(item, dict):
+                        sub_elem = ET.SubElement(parent, key.rstrip('s'))  # Remove trailing 's' for singular form
+                        for k, v in item.items():
+                            _add_element(sub_elem, k, v)
+                    else:
+                        sub_elem = ET.SubElement(parent, key.rstrip('s'))
+                        sub_elem.text = str(item)
+            else:
+                sub_elem = ET.SubElement(parent, key)
+                sub_elem.text = str(value)
+        
+        for key, value in data.items():
+            _add_element(root, key, value)
+        
+        return ET.tostring(root, encoding='utf-8', method='xml').decode('utf-8')
+    
+    def _xml_to_dict(self, xml_string: str) -> Dict[str, Any]:
+        """
+        Convert XML string to dictionary.
+        
+        Args:
+            xml_string: XML string to convert
+            
+        Returns:
+            Dictionary representation of XML
+        """
+        root = ET.fromstring(xml_string)
+        
+        def _element_to_dict(element):
+            result = {}
+            
+            # Add element attributes
+            for key, value in element.attrib.items():
+                result[f"@{key}"] = value
+                
+            # Add element text if it exists
+            if element.text and element.text.strip():
+                result["#text"] = element.text.strip()
+                
+            # Add child elements
+            for child in element:
+                child_data = _element_to_dict(child)
+                
+                child_tag = child.tag
+                if child_tag in result:
+                    # If this tag already exists, convert to list or append to existing list
+                    if isinstance(result[child_tag], list):
+                        result[child_tag].append(child_data)
+                    else:
+                        result[child_tag] = [result[child_tag], child_data]
+                else:
+                    result[child_tag] = child_data
+                    
+            return result
+        
+        return _element_to_dict(root)
+    
+    def _handle_response(self, response: requests.Response) -> Dict[str, Any]:
+        """
+        Handle API response and convert to dictionary.
+        
+        Args:
+            response: API response
+            
+        Returns:
+            Dictionary representation of response
+            
+        Raises:
+            Exception: If API request failed
+        """
+        if response.status_code >= 400:
+            logger.error(f"Kickserv API error: {response.status_code} - {response.text}")
+            response.raise_for_status()
+            
+        if not response.text:
+            return {}
+            
+        return self._xml_to_dict(response.text)
+    
+    def get(self, endpoint: str, params: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+        """
+        Make a GET request to the Kickserv API.
+        
+        Args:
+            endpoint: API endpoint
+            params: Query parameters
+            
+        Returns:
+            API response as dictionary
+        """
+        url = self._build_url(endpoint)
+        logger.debug(f"GET {url}")
+        
+        response = requests.get(
+            url,
+            auth=self.auth,
+            headers=self.headers,
+            params=params
+        )
+        
+        return self._handle_response(response)
+    
+    def post(self, endpoint: str, data: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        Make a POST request to the Kickserv API.
+        
+        Args:
+            endpoint: API endpoint
+            data: Request data
+            
+        Returns:
+            API response as dictionary
+        """
+        url = self._build_url(endpoint)
+        logger.debug(f"POST {url}")
+        
+        # Determine the root tag from the endpoint
+        parts = endpoint.strip('/').split('/')
+        root_tag = parts[-1]
+        if root_tag.endswith('.xml'):
+            root_tag = root_tag[:-4]  # Remove .xml suffix
+            
+        # If the endpoint has an ID, it's likely a nested resource
+        if len(parts) > 1 and parts[-2].isdigit():
+            root_tag = root_tag.rstrip('s')  # Use singular form
+            
+        xml_data = self._dict_to_xml(root_tag, data)
+        
+        response = requests.post(
+            url,
+            auth=self.auth,
+            headers=self.headers,
+            data=xml_data
+        )
+        
+        return self._handle_response(response)
+    
+    def patch(self, endpoint: str, data: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        Make a PATCH request to the Kickserv API.
+        
+        Args:
+            endpoint: API endpoint
+            data: Request data
+            
+        Returns:
+            API response as dictionary
+        """
+        url = self._build_url(endpoint)
+        logger.debug(f"PATCH {url}")
+        
+        # Determine the root tag from the endpoint
+        parts = endpoint.strip('/').split('/')
+        root_tag = parts[-1]
+        if root_tag.endswith('.xml'):
+            root_tag = root_tag[:-4]  # Remove .xml suffix
+            
+        # If the endpoint has an ID, it's likely a specific resource
+        if len(parts) > 1 and parts[-2].isdigit():
+            root_tag = root_tag.rstrip('s')  # Use singular form
+            
+        xml_data = self._dict_to_xml(root_tag, data)
+        
+        response = requests.patch(
+            url,
+            auth=self.auth,
+            headers=self.headers,
+            data=xml_data
+        )
+        
+        return self._handle_response(response)
+    
+    def delete(self, endpoint: str) -> Dict[str, Any]:
+        """
+        Make a DELETE request to the Kickserv API.
+        
+        Args:
+            endpoint: API endpoint
+            
+        Returns:
+            API response as dictionary
+        """
+        url = self._build_url(endpoint)
+        logger.debug(f"DELETE {url}")
+        
+        response = requests.delete(
+            url,
+            auth=self.auth,
+            headers=self.headers
+        )
+        
+        return self._handle_response(response)
+Kickserv Service Implementation
+# backend/integrations/kickserv/service.py
+from typing import Dict, Any, List, Optional
+import logging
+from datetime import datetime, timedelta
+from .client import KickservClient
+
+logger = logging.getLogger(__name__)
+
+class KickservService:
+    """Service for interacting with Kickserv API."""
+    
+    def __init__(self, client: Optional[KickservClient] = None):
+        """
+        Initialize the Kickserv service.
+        
+        Args:
+            client: Kickserv API client (optional, will create a new client if not provided)
+        """
+        self.client = client or KickservClient()
+    
+    # Customer methods
+    def get_customers(self) -> List[Dict[str, Any]]:
+        """
+        Get all customers.
+        
+        Returns:
+            List of customers
+        """
+        response = self.client.get('/customers.xml')
+        customers = response.get('customers', {}).get('customer', [])
+        
+        # Ensure we always return a list
+        if not isinstance(customers, list):
+            customers = [customers]
+            
+        return customers
+    
+    def get_customer(self, customer_number: str) -> Dict[str, Any]:
+        """
+        Get a specific customer.
+        
+        Args:
+            customer_number: Customer number
+            
+        Returns:
+            Customer details
+        """
+        response = self.client.get(f'/customers/{customer_number}.xml')
+        return response.get('customer', {})
+    
+    def create_customer(self, customer_data: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        Create a new customer.
+        
+        Args:
+            customer_data: Customer data
+            
+        Returns:
+            Created customer details
+        """
+        response = self.client.post('/customers.xml', {'customer': customer_data})
+        return response.get('customer', {})
+    
+    def update_customer(self, customer_number: str, customer_data: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        Update a customer.
+        
+        Args:
+            customer_number: Customer number
+            customer_data: Updated customer data
+            
+        Returns:
+            Updated customer details
+        """
+        response = self.client.patch(f'/customers/{customer_number}.xml', {'customer': customer_data})
+        return response.get('customer', {})
+    
+    def delete_customer(self, customer_number: str) -> bool:
+        """
+        Delete a customer.
+        
+        Args:
+            customer_number: Customer number
+            
+        Returns:
+            True if successful
+        """
+        self.client.delete(f'/customers/{customer_number}.xml')
+        return True
+    
+    # Job methods
+    def get_jobs(self, filters: Optional[Dict[str, Any]] = None) -> List[Dict[str, Any]]:
+        """
+        Get all jobs with optional filtering.
+        
+        Args:
+            filters: Optional filters for jobs
+            
+        Returns:
+            List of jobs
+        """
+        response = self.client.get('/jobs.xml', params=filters)
+        jobs = response.get('jobs', {}).get('job', [])
+        
+        # Ensure we always return a list
+        if not isinstance(jobs, list):
+            jobs = [jobs]
+            
+        return jobs
+    
+    def get_job(self, job_number: str) -> Dict[str, Any]:
+        """
+        Get a specific job.
+        
+        Args:
+            job_number: Job number
+            
+        Returns:
+            Job details
+        """
+        response = self.client.get(f'/jobs/{job_number}.xml')
+        return response.get('job', {})
+    
+    def create_job(self, job_data: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        Create a new job.
+        
+        Args:
+            job_data: Job data
+            
+        Returns:
+            Created job details
+        """
+        response = self.client.post('/jobs.xml', {'job': job_data})
+        return response.get('job', {})
+    
+    def update_job(self, job_number: str, job_data: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        Update a job.
+        
+        Args:
+            job_number: Job number
+            job_data: Updated job data
+            
+        Returns:
+            Updated job details
+        """
+        response = self.client.patch(f'/jobs/{job_number}.xml', {'job': job_data})
+        return response.get('job', {})
+    
+    def delete_job(self, job_number: str) -> bool:
+        """
+        Delete a job.
+        
+        Args:
+            job_number: Job number
+            
+        Returns:
+            True if successful
+        """
+        self.client.delete(f'/jobs/{job_number}.xml')
+        return True
+    
+    def add_job_charge(self, job_number: str, charge_data: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        Add a charge to a job.
+        
+        Args:
+            job_number: Job number
+            charge_data: Charge data
+            
+        Returns:
+            Created charge details
+        """
+        response = self.client.post(f'/jobs/{job_number}/job_charges.xml', {'job_charge': charge_data})
+        return response.get('job_charge', {})
+    
+    # Employee methods
+    def get_employees(self) -> List[Dict[str, Any]]:
+        """
+        Get all employees.
+        
+        Returns:
+            List of employees
+        """
+        response = self.client.get('/employees.xml')
+        employees = response.get('employees', {}).get('employee', [])
+        
+        # Ensure we always return a list
+        if not isinstance(employees, list):
+            employees = [employees]
+            
+        return employees
+    
+    def get_employee(self, employee_number: str) -> Dict[str, Any]:
+        """
+        Get a specific employee.
+        
+        Args:
+            employee_number: Employee number
+            
+        Returns:
+            Employee details
+        """
+        response = self.client.get(f'/employees/{employee_number}.xml')
+        return response.get('employee', {})
+    
+    # Task methods
+    def create_task(self, task_data: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        Create a new task.
+        
+        Args:
+            task_data: Task data
+            
+        Returns:
+            Created task details
+        """
+        response = self.client.post('/tasks.xml', {'task': task_data})
+        return response.get('task', {})
+    
+    def get_task(self, task_id: str) -> Dict[str, Any]:
+        """
+        Get a specific task.
+        
+        Args:
+            task_id: Task ID
+            
+        Returns:
+            Task details
+        """
+        response = self.client.get(f'/tasks/{task_id}.xml')
+        return response.get('task', {})
+    
+    def update_task(self, task_id: str, task_data: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        Update a task.
+        
+        Args:
+            task_id: Task ID
+            task_data: Updated task data
+            
+        Returns:
+            Updated task details
+        """
+        response = self.client.patch(f'/tasks/{task_id}.xml', {'task': task_data})
+        return response.get('task', {})
+    
+    def delete_task(self, task_id: str) -> bool:
+        """
+        Delete a task.
+        
+        Args:
+            task_id: Task ID
+            
+        Returns:
+            True if successful
+        """
+        self.client.delete(f'/tasks/{task_id}.xml')
+        return True
+    
+    # Time entries methods
+    def get_time_entries(self, job_number: str) -> List[Dict[str, Any]]:
+        """
+        Get all time entries for a job.
+        
+        Args:
+            job_number: Job number
+            
+        Returns:
+            List of time entries
+        """
+        response = self.client.get(f'/jobs/{job_number}/time_entries.xml')
+        entries = response.get('time_entries', {}).get('time_entry', [])
+        
+        # Ensure we always return a list
+        if not isinstance(entries, list):
+            entries = [entries]
+            
+        return entries
+    
+    def create_time_entry(self, job_number: str, entry_data: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        Create a new time entry for a job.
+        
+        Args:
+            job_number: Job number
+            entry_data: Time entry data
+            
+        Returns:
+            Created time entry details
+        """
+        response = self.client.post(f'/jobs/{job_number}/time_entries.xml', {'time_entry': entry_data})
+        return response.get('time_entry', {})
+Agent Integration with Kickserv
+Now, let's integrate the Kickserv service with our agent system by creating a specialized agent for handling Kickserv operations:
+# backend/agent_system/agents/manager/kickserv_manager.py
+from typing import Dict, Any, List
+import logging
+from datetime import datetime
+
+from agent_system.agents.base import ManagerAgent
+from integrations.kickserv.service import KickservService
+
+logger = logging.getLogger(__name__)
+
+class KickservManagerAgent(ManagerAgent):
+    """
+    Manager agent responsible for Kickserv integration operations.
+    
+    This agent facilitates communication between the AI system and the Kickserv API,
+    handling operations like customer management, job creation, scheduling, etc.
+    """
+    
+    def __init__(self, model_name: str, **kwargs):
+        """
+        Initialize the Kickserv manager agent.
+        
+        Args:
+            model_name: Name of the LLM model to use
+            **kwargs: Additional arguments to pass to the base class
+        """
+        super().__init__(model_name, **kwargs)
+        self.kickserv = KickservService()
+        self.agent_name = "Kickserv Manager"
+        self.agent_description = "Manages integration with Kickserv for customer, job, and scheduling operations"
+    
+    async def sync_customer(self, request: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        Sync a customer between the AI system and Kickserv.
+        
+        Args:
+            request: Sync request data
+            
+        Returns:
+            Result of the sync operation
+        """
+        customer_data = request.get('context', {}).get('customer_data', {})
+        
+        # Check if customer exists in Kickserv
+        kickserv_id = customer_data.get('kickserv_id')
+        
+        if kickserv_id:
+            # Update existing customer in Kickserv
+            logger.info(f"Updating customer in Kickserv: {kickserv_id}")
+            
+            kickserv_customer = {
+                'first_name': customer_data.get('first_name'),
+                'last_name': customer_data.get('last_name'),
+                'company_name': customer_data.get('company_name', ''),
+                'email': customer_data.get('email', ''),
+                'address': customer_data.get('address_line1', ''),
+                'address2': customer_data.get('address_line2', ''),
+                'city': customer_data.get('city', ''),
+                'state': customer_data.get('state', ''),
+                'zip': customer_data.get('zip', ''),
+                'phone': customer_data.get('phone', ''),
+                'mobile': customer_data.get('mobile', ''),
+                'source': customer_data.get('source', 'AI System'),
+                'notes': customer_data.get('notes', ''),
+            }
+            
+            updated_customer = self.kickserv.update_customer(kickserv_id, kickserv_customer)
+            
+            return {
+                'status': 'success',
+                'operation': 'update',
+                'kickserv_id': kickserv_id,
+                'customer': updated_customer
+            }
+        else:
+            # Create new customer in Kickserv
+            logger.info("Creating new customer in Kickserv")
+            
+            kickserv_customer = {
+                'first_name': customer_data.get('first_name'),
+                'last_name': customer_data.get('last_name'),
+                'company_name': customer_data.get('company_name', ''),
+                'email': customer_data.get('email', ''),
+                'address': customer_data.get('address_line1', ''),
+                'address2': customer_data.get('address_line2', ''),
+                'city': customer_data.get('city', ''),
+                'state': customer_data.get('state', ''),
+                'zip': customer_data.get('zip', ''),
+                'phone': customer_data.get('phone', ''),
+                'mobile': customer_data.get('mobile', ''),
+                'source': customer_data.get('source', 'AI System'),
+                'notes': customer_data.get('notes', ''),
+            }
+            
+            new_customer = self.kickserv.create_customer(kickserv_customer)
+            
+            # Get the Kickserv ID from the response
+            kickserv_id = new_customer.get('@id')
+            
+            return {
+                'status': 'success',
+                'operation': 'create',
+                'kickserv_id': kickserv_id,
+                'customer': new_customer
+            }
+    
+    async def create_service_job(self, request: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        Create a new service job in Kickserv.
+        
+        Args:
+            request: Service job creation request data
+            
+        Returns:
+            Result of the job creation operation
+        """
+        service_data = request.get('context', {}).get('service_request', {})
+        customer_id = service_data.get('customer_id')
+        kickserv_customer_id = service_data.get('kickserv_customer_id')
+        
+        # If we don't have a Kickserv customer ID, look it up or create the customer
+        if not kickserv_customer_id and customer_id:
+            # Look up customer by ID in our database
+            # This is just a placeholder - in a real implementation, you would fetch from your database
+            customer_data = {
+                'id': customer_id,
+                'first_name': service_data.get('customer_first_name', ''),
+                'last_name': service_data.get('customer_last_name', ''),
+                'email': service_data.get('customer_email', ''),
+                'phone': service_data.get('customer_phone', ''),
+            }
+            
+            # Sync customer with Kickserv
+            sync_result = await self.sync_customer({
+                'context': {
+                    'customer_data': customer_data
+                }
+            })
+            
+            kickserv_customer_id = sync_result.get('kickserv_id')
+        
+        # Create job in Kickserv
+        job_data = {
+            'customer_id': kickserv_customer_id,
+            'name': f"Appliance Repair - {service_data.get('appliance_type', 'Unknown')}",
+            'description': service_data.get('issue_description', ''),
+            'notes': service_data.get('notes', ''),
+            'scheduled_at': service_data.get('preferred_date', ''),
+            'duration': service_data.get('duration_minutes', 60),
+            'status': 'pending',
+            'priority': service_data.get('priority', 'medium'),
+        }
+        
+        # Add job charges if any
+        if 'estimated_cost' in service_data and service_data['estimated_cost']:
+            job_data['charges_attributes'] = {
+                'charge': {
+                    'description': f"Service - {service_data.get('appliance_type', 'Appliance')} Repair",
+                    'quantity': 1,
+                    'unit_price': service_data['estimated_cost']
+                }
+            }
+        
+        new_job = self.kickserv.create_job(job_data)
+        
+        # Get the Kickserv job ID from the response
+        kickserv_job_id = new_job.get('@id')
+        
+        return {
+            'status': 'success',
+            'operation': 'create_job',
+            'kickserv_job_id': kickserv_job_id,
+            'job': new_job
+        }
+    
+    async def process(self, request: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        Process a request related to Kickserv integration.
+        
+        Args:
+            request: Request data
+            
+        Returns:
+            Result of the operation
+        """
+        request_type = request.get('type', '')
+        
+        if request_type == 'ghl_sync':
+            # Sync customer with Kickserv
+            return await self.sync_customer(request)
+        elif request_type == 'create_service_request':
+            # Create a new service request in Kickserv
+            return await self.create_service_job(request)
+        elif request_type == 'kickserv_query':
+            # Query Kickserv for information
+            # This would be implemented based on specific needs
+            pass
+        else:
+            # Default processing
+            # Format appropriate prompts for the LLM to generate a response
+            prompt = self._build_prompt(request)
+            response = await self.llm_service.generate(prompt)
+            
+            return {
+                'status': 'success',
+                'response': response,
+                'kickserv_operation': None
+            }
+    
+    def _build_prompt(self, request: Dict[str, Any]) -> str:
+        """
+        Build a prompt for the LLM based on the request.
+        
+        Args:
+            request: Request data
+            
+        Returns:
+            Formatted prompt for the LLM
+        """
+        content = request.get('content', '')
+        context = request.get('context', {})
+        
+        prompt = f"""
+        You are a Kickserv integration specialist for an appliance repair business.
+        
+        User request: {content}
+        
+        Context information:
+        {context}
+        
+        Based on this information, what should be done with the Kickserv system?
+        Provide a detailed response with specific steps to take.
+        """
+        
+        return prompt
+
+Example Usage in API Endpoints
+Here's how we can integrate Kickserv with our API endpoints:
+# backend/routes/kickserv.py
+from fastapi import APIRouter, Depends, HTTPException, status
+from typing import Dict, Any, List
+
+from auth.jwt import get_current_active_user
+from agent_system.core import AgentSystem
+
+router = APIRouter(
+    prefix="/api/integrations/kickserv",
+    tags=["kickserv"]
+)
+
+# Dependency to get the agent system
+def get_agent_system():
+    return AgentSystem("config/agent_system.yaml")
+
+@router.post("/sync-customer", response_model=Dict[str, Any])
+async def sync_customer_with_kickserv(
+    data: Dict[str, Any],
+    current_user: Dict[str, Any] = Depends(get_current_active_user),
+    agent_system: AgentSystem = Depends(get_agent_system)
+):
+    """
+    Sync a customer with Kickserv.
+    
+    This endpoint will create or update a customer in Kickserv based on the
+    customer data provided in the request.
+    """
+    try:
+        # Process with agent system
+        request = {
+            "id": f"kickserv_sync_{data.get('customer_id')}",
+            "type": "ghl_sync",  # We'll use the same type as GHL for simplicity
+            "content": "Sync customer with Kickserv",
+            "context": {
+                "customer_data": data
+            }
+        }
+        
+        result = await agent_system.process_request(request)
+        return result
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Error syncing with Kickserv: {str(e)}"
+        )
+
+@router.post("/service-requests", response_model=Dict[str, Any])
+async def create_kickserv_service_request(
+    data: Dict[str, Any],
+    current_user: Dict[str, Any] = Depends(get_current_active_user),
+    agent_system: AgentSystem = Depends(get_agent_system)
+):
+    """
+    Create a new service request in Kickserv.
+    
+    This endpoint will create a new service job in Kickserv based on the
+    service request data provided in the request.
+    """
+    try:
+        # Process with agent system
+        request = {
+            "id": f"kickserv_job_{data.get('id')}",
+            "type": "create_service_request",
+            "content": "Create service request in Kickserv",
+            "context": {
+                "service_request": data
+            }
+        }
+        
+        result = await agent_system.process_request(request)
+        return result
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Error creating service request in Kickserv: {str(e)}"
+        )
+
+@router.get("/jobs", response_model=List[Dict[str, Any]])
+async def get_kickserv_jobs(
+    status: str = None,
+    from_date: str = None,
+    to_date: str = None,
+    current_user: Dict[str, Any] = Depends(get_current_active_user),
+    agent_system: AgentSystem = Depends(get_agent_system)
+):
+    """
+    Get jobs from Kickserv with optional filtering.
+    
+    Args:
+        status: Filter by job status
+        from_date: Filter by jobs scheduled after this date (YYYY-MM-DD)
+        to_date: Filter by jobs scheduled before this date (YYYY-MM-DD)
+    """
+    try:
+        # Create filters
+        filters = {}
+        if status:
+            filters["status"] = status
+        if from_date:
+            filters["from_date"] = from_date
+        if to_date:
+            filters["to_date"] = to_date
+        
+        # Process with agent system
+        request = {
+            "id": "kickserv_get_jobs",
+            "type": "kickserv_query",
+            "content": "Get jobs from Kickserv",
+            "context": {
+                "operation": "get_jobs",
+                "filters": filters
+            }
+        }
+        
+        result = await agent_system.process_request(request)
+        return result.get("jobs", [])
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Error fetching jobs from Kickserv: {str(e)}"
+        )
+
+Integration with Frontend
+// src/components/integrations/KickservSettings.jsx
+import React, { useState, useEffect } from 'react';
+import { 
+  Box, 
+  Paper, 
+  Typography, 
+  TextField, 
+  Button, 
+  Alert, 
+  CircularProgress,
+  Switch,
+  FormControlLabel
+} from '@mui/material';
+import { testKickservConnection, saveKickservSettings } from '../../api/integrations';
+
+const KickservSettings = () => {
+  const [loading, setLoading] = useState(false);
+  const [testLoading, setTestLoading] = useState(false);
+  const [success, setSuccess] = useState(false);
+  const [error, setError] = useState('');
+  const [testResult, setTestResult] = useState(null);
+  
+  const [settings, setSettings] = useState({
+    api_token: '',
+    account_slug: '',
+    enabled: true
+  });
+  
+  useEffect(() => {
+    // Load existing settings
+    const loadSettings = async () => {
+      try {
+        setLoading(true);
+        const response = await fetch('/api/integrations/kickserv/settings');
+        if (response.ok) {
+          const data = await response.json();
+          setSettings({
+            api_token: data.api_token || '',
+            account_slug: data.account_slug || '',
+            enabled: data.enabled !== false // Default to true
+          });
+        }
+      } catch (error) {
+        console.error('Error loading Kickserv settings:', error);
+      } finally {
+        setLoading(false);
+      }
+    };
+    
+    loadSettings();
+  }, []);
+  
+  const handleInputChange = (e) => {
+    const { name, value } = e.target;
+    setSettings({
+      ...settings,
+      [name]: value
+    });
+    
+    // Clear any success/error messages when settings change
+    setSuccess(false);
+    setError('');
+    setTestResult(null);
+  };
+  
+  const handleSwitchChange = (e) => {
+    const { name, checked } = e.target;
+    setSettings({
+      ...settings,
+      [name]: checked
+    });
+    
+    // Clear any success/error messages when settings change
+    setSuccess(false);
+    setError('');
+  };
+  
+  const handleTestConnection = async () => {
+    if (!settings.api_token || !settings.account_slug) {
+      setError('API token and account slug are required');
+      return;
+    }
+    
+    try {
+      setTestLoading(true);
+      setTestResult(null);
+      
+      const result = await testKickservConnection({
+        api_token: settings.api_token,
+        account_slug: settings.account_slug
+      });
+      
+      setTestResult({
+        success: result.success,
+        message: result.message,
+        details: result.details
+      });
+    } catch (error) {
+      setTestResult({
+        success: false,
+        message: 'Connection test failed',
+        details: error.message
+      });
+    } finally {
+      setTestLoading(false);
+    }
+  };
+  
+  const handleSaveSettings = async () => {
+    if (!settings.api_token || !settings.account_slug) {
+      setError('API token and account slug are required');
+      return;
+    }
+    
+    try {
+      setLoading(true);
+      setSuccess(false);
+      setError('');
+      
+      await saveKickservSettings(settings);
+      
+      setSuccess(true);
+    } catch (error) {
+      setError('Failed to save settings: ' + error.message);
+    } finally {
+      setLoading(false);
+    }
+  };
+  
+  return (
+    <Paper sx={{ p: 3 }}>
+      <Typography variant="h5" gutterBottom>
+        Kickserv Integration Settings
+      </Typography>
+      
+      <Typography variant="body2" color="textSecondary" sx={{ mb: 3 }}>
+        Connect your Kickserv account to enable seamless integration with your appliance repair business automation system.
+        You can find your API token in the employee management section of your Kickserv account.
+      </Typography>
+      
+      {success && (
+        <Alert severity="success" sx={{ mb: 2 }}>
+          Kickserv settings saved successfully!
+        </Alert>
+      )}
+      
+      {error && (
+        <Alert severity="error" sx={{ mb: 2 }}>
+          {error}
+        </Alert>
+      )}
+      
+      {testResult && (
+        <Alert severity={testResult.success ? "success" : "error"} sx={{ mb: 2 }}>
+          <Typography variant="subtitle2">
+            {testResult.message}
+          </Typography>
+          {testResult.details && (
+            <Typography variant="body2">
+              {testResult.details}
+            </Typography>
+          )}
+        </Alert>
+      )}
+      
+      <Box component="form" sx={{ mt: 2 }}>
+        <TextField
+          name="account_slug"
+          label="Account Slug"
+          value={settings.account_slug}
+          onChange={handleInputChange}
+          fullWidth
+          margin="normal"
+          required
+          helperText="Your Kickserv account slug (e.g., 'yourcompany' from app.kickserv.com/yourcompany)"
+        />
+        
+        <TextField
+          name="api_token"
+          label="API Token"
+          value={settings.api_token}
+          onChange={handleInputChange}
+          fullWidth
+          margin="normal"
+          required
+          type="password"
+          helperText="Your Kickserv API token (found in employee management)"
+        />
+        
+        <FormControlLabel
+          control={
+            <Switch
+              checked={settings.enabled}
+              onChange={handleSwitchChange}
+              name="enabled"
+              color="primary"
+            />
+          }
+          label="Enable Kickserv Integration"
+          sx={{ mt: 2, mb: 2 }}
+/>
+<Box sx={{ display: 'flex', justifyContent: 'space-between', mt: 3 }}>
+<Button
+variant="outlined"
+onClick={handleTestConnection}
+disabled={testLoading || !settings.api_token || !settings.account_slug}
+startIcon={testLoading ? <CircularProgress size={20} /> : null}
+>
+Test Connection
+</Button>
+<Button
+variant="contained"
+color="primary"
+onClick={handleSaveSettings}
+disabled={loading || !settings.api_token || !settings.account_slug}
+startIcon={loading ? <CircularProgress size={20} /> : null}
+>
+Save Settings
+</Button>
+</Box>
+</Box>
+</Paper>
+);
+};
+export default KickservSettings;
+
+Let's add a component to display Kickserv jobs and synchronize data:
+
+```jsx
+// src/components/integrations/KickservJobs.jsx
+import React, { useState, useEffect } from 'react';
+import { 
+  Box, 
+  Paper, 
+  Typography, 
+  Button, 
+  Alert, 
+  CircularProgress,
+  Table,
+  TableBody,
+  TableCell,
+  TableContainer,
+  TableHead,
+  TableRow,
+  Chip,
+  IconButton,
+  TextField,
+  MenuItem,
+  Grid,
+  Tooltip,
+  Dialog,
+  DialogTitle,
+  DialogContent,
+  DialogActions
+} from '@mui/material';
+import { 
+  Refresh as RefreshIcon,
+  Sync as SyncIcon,
+  Edit as EditIcon,
+  Delete as DeleteIcon,
+  SearchOutlined
+} from '@mui/icons-material';
+import { DatePicker } from '@mui/x-date-pickers/DatePicker';
+import { LocalizationProvider } from '@mui/x-date-pickers/LocalizationProvider';
+import { AdapterDateFns } from '@mui/x-date-pickers/AdapterDateFns';
+import { fetchKickservJobs, syncServiceRequest } from '../../api/integrations';
+
+const KickservJobs = () => {
+  const [loading, setLoading] = useState(false);
+  const [syncLoading, setSyncLoading] = useState(false);
+  const [jobs, setJobs] = useState([]);
+  const [error, setError] = useState('');
+  const [success, setSuccess] = useState('');
+  const [selectedJobId, setSelectedJobId] = useState(null);
+  const [syncDialogOpen, setSyncDialogOpen] = useState(false);
+  
+  // Filters
+  const [filters, setFilters] = useState({
+    status: '',
+    fromDate: null,
+    toDate: null,
+    searchQuery: ''
+  });
+  
+  const statusOptions = [
+    { value: '', label: 'All Statuses' },
+    { value: 'pending', label: 'Pending' },
+    { value: 'scheduled', label: 'Scheduled' },
+    { value: 'in_progress', label: 'In Progress' },
+    { value: 'completed', label: 'Completed' },
+    { value: 'cancelled', label: 'Cancelled' }
+  ];
+  
+  const loadJobs = async () => {
+    try {
+      setLoading(true);
+      setError('');
+      
+      // Build query parameters
+      const params = new URLSearchParams();
+      if (filters.status) {
+        params.append('status', filters.status);
+      }
+      if (filters.fromDate) {
+        params.append('from_date', filters.fromDate.toISOString().split('T')[0]);
+      }
+      if (filters.toDate) {
+        params.append('to_date', filters.toDate.toISOString().split('T')[0]);
+      }
+      
+      const data = await fetchKickservJobs(params.toString());
+      setJobs(data);
+    } catch (err) {
+      console.error('Error loading Kickserv jobs:', err);
+      setError('Failed to load jobs from Kickserv');
+    } finally {
+      setLoading(false);
+    }
+  };
+  
+  useEffect(() => {
+    loadJobs();
+  }, []);
+  
+  const handleFilterChange = (name, value) => {
+    setFilters({
+      ...filters,
+      [name]: value
+    });
+  };
+  
+  const handleApplyFilters = () => {
+    loadJobs();
+  };
+  
+  const handleClearFilters = () => {
+    setFilters({
+      status: '',
+      fromDate: null,
+      toDate: null,
+      searchQuery: ''
+    });
+  };
+  
+  const handleSyncJob = (jobId) => {
+    setSelectedJobId(jobId);
+    setSyncDialogOpen(true);
+  };
+  
+  const handleConfirmSync = async () => {
+    try {
+      setSyncLoading(true);
+      setError('');
+      setSuccess('');
+      
+      // Find the selected job
+      const job = jobs.find(j => j.id === selectedJobId);
+      if (!job) {
+        throw new Error('Job not found');
+      }
+      
+      // Convert Kickserv job to service request format
+      const serviceRequest = {
+        kickserv_job_id: job.id,
+        kickserv_customer_id: job.customer_id,
+        customer_name: job.customer_name,
+        appliance_type: job.name.includes('-') ? job.name.split('-')[1].trim() : 'Unknown',
+        issue_description: job.description || '',
+        notes: job.notes || '',
+        priority: job.priority || 'medium',
+        status: job.status || 'pending',
+        estimated_cost: job.total || 0,
+      };
+      
+      // Sync job with our system
+      await syncServiceRequest(serviceRequest);
+      
+      setSuccess(`Successfully synchronized job #${job.id}`);
+      setSyncDialogOpen(false);
+    } catch (err) {
+      console.error('Error syncing job:', err);
+      setError(`Failed to sync job: ${err.message}`);
+    } finally {
+      setSyncLoading(false);
+    }
+  };
+  
+  const handleCloseDialog = () => {
+    setSyncDialogOpen(false);
+    setSelectedJobId(null);
+  };
+  
+  return (
+    <Paper sx={{ p: 3 }}>
+      <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 3 }}>
+        <Typography variant="h5">
+          Kickserv Jobs
+        </Typography>
+        
+        <Button 
+          variant="outlined" 
+          startIcon={<RefreshIcon />}
+          onClick={loadJobs}
+          disabled={loading}
+        >
+          Refresh
+        </Button>
+      </Box>
+      
+      {error && (
+        <Alert severity="error" sx={{ mb: 2 }}>
+          {error}
+        </Alert>
+      )}
+      
+      {success && (
+        <Alert severity="success" sx={{ mb: 2 }}>
+          {success}
+        </Alert>
+      )}
+      
+      {/* Filters */}
+      <Paper variant="outlined" sx={{ p: 2, mb: 3 }}>
+        <Typography variant="subtitle1" gutterBottom>
+          Filters
+        </Typography>
+        
+        <Grid container spacing={2} alignItems="center">
+          <Grid item xs={12} sm={6} md={3}>
+            <TextField
+              select
+              label="Status"
+              value={filters.status}
+              onChange={(e) => handleFilterChange('status', e.target.value)}
+              fullWidth
+              margin="dense"
+            >
+              {statusOptions.map((option) => (
+                <MenuItem key={option.value} value={option.value}>
+                  {option.label}
+                </MenuItem>
+              ))}
+            </TextField>
+          </Grid>
+          
+          <Grid item xs={12} sm={6} md={3}>
+            <LocalizationProvider dateAdapter={AdapterDateFns}>
+              <DatePicker
+                label="From Date"
+                value={filters.fromDate}
+                onChange={(newValue) => handleFilterChange('fromDate', newValue)}
+                renderInput={(params) => <TextField {...params} fullWidth margin="dense" />}
+              />
+            </LocalizationProvider>
+          </Grid>
+          
+          <Grid item xs={12} sm={6} md={3}>
+            <LocalizationProvider dateAdapter={AdapterDateFns}>
+              <DatePicker
+                label="To Date"
+                value={filters.toDate}
+                onChange={(newValue) => handleFilterChange('toDate', newValue)}
+                renderInput={(params) => <TextField {...params} fullWidth margin="dense" />}
+              />
+            </LocalizationProvider>
+          </Grid>
+          
+          <Grid item xs={12} sm={6} md={3}>
+            <TextField
+              label="Search"
+              value={filters.searchQuery}
+              onChange={(e) => handleFilterChange('searchQuery', e.target.value)}
+              fullWidth
+              margin="dense"
+              InputProps={{
+                endAdornment: (
+                  <IconButton size="small">
+                    <SearchOutlined />
+                  </IconButton>
+                ),
+              }}
+            />
+          </Grid>
+          
+          <Grid item xs={12} sm={12} md={12} sx={{ display: 'flex', justifyContent: 'flex-end' }}>
+            <Button
+              variant="outlined"
+              onClick={handleClearFilters}
+              sx={{ mr: 1 }}
+            >
+              Clear
+            </Button>
+            <Button
+              variant="contained"
+              onClick={handleApplyFilters}
+            >
+              Apply Filters
+            </Button>
+          </Grid>
+        </Grid>
+      </Paper>
+      
+      {/* Jobs Table */}
+      <TableContainer component={Paper} variant="outlined">
+        <Table sx={{ minWidth: 650 }}>
+          <TableHead>
+            <TableRow>
+              <TableCell>Job #</TableCell>
+              <TableCell>Customer</TableCell>
+              <TableCell>Job Name</TableCell>
+              <TableCell>Scheduled</TableCell>
+              <TableCell>Status</TableCell>
+              <TableCell>Total</TableCell>
+              <TableCell>Actions</TableCell>
+            </TableRow>
+          </TableHead>
+          <TableBody>
+            {loading ? (
+              <TableRow>
+                <TableCell colSpan={7} align="center" sx={{ py: 3 }}>
+                  <CircularProgress size={40} />
+                  <Typography variant="body2" sx={{ mt: 1 }}>
+                    Loading jobs...
+                  </Typography>
+                </TableCell>
+              </TableRow>
+            ) : jobs.length === 0 ? (
+              <TableRow>
+                <TableCell colSpan={7} align="center" sx={{ py: 3 }}>
+                  <Typography variant="body1">
+                    No jobs found
+                  </Typography>
+                  <Typography variant="body2" color="textSecondary">
+                    Try adjusting your filters or refreshing the data
+                  </Typography>
+                </TableCell>
+              </TableRow>
+            ) : (
+              jobs.map((job) => (
+                <TableRow key={job.id}>
+                  <TableCell>{job.number}</TableCell>
+                  <TableCell>{job.customer_name}</TableCell>
+                  <TableCell>{job.name}</TableCell>
+                  <TableCell>
+                    {job.scheduled_at ? new Date(job.scheduled_at).toLocaleDateString() : 'Not scheduled'}
+                  </TableCell>
+                  <TableCell>
+                    <Chip 
+                      label={job.status} 
+                      color={
+                        job.status === 'completed' ? 'success' : 
+                        job.status === 'cancelled' ? 'error' :
+                        job.status === 'in_progress' ? 'primary' :
+                        job.status === 'scheduled' ? 'info' : 'default'
+                      }
+                      size="small"
+                    />
+                  </TableCell>
+                  <TableCell>${parseFloat(job.total || 0).toFixed(2)}</TableCell>
+                  <TableCell>
+                    <Box sx={{ display: 'flex' }}>
+                      <Tooltip title="Sync to System">
+                        <IconButton 
+                          size="small" 
+                          color="primary"
+                          onClick={() => handleSyncJob(job.id)}
+                        >
+                          <SyncIcon />
+                        </IconButton>
+                      </Tooltip>
+                      <Tooltip title="View Details">
+                        <IconButton 
+                          size="small"
+                          href={`/jobs/${job.id}`}
+                        >
+                          <EditIcon />
+                        </IconButton>
+                      </Tooltip>
+                    </Box>
+                  </TableCell>
+                </TableRow>
+              ))
+            )}
+          </TableBody>
+        </Table>
+      </TableContainer>
+      
+      {/* Sync Confirmation Dialog */}
+      <Dialog open={syncDialogOpen} onClose={handleCloseDialog}>
+        <DialogTitle>Synchronize Job</DialogTitle>
+        <DialogContent>
+          <Typography>
+            Are you sure you want to synchronize this job with your system? This will create or update a service request in your database.
+          </Typography>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={handleCloseDialog}>Cancel</Button>
+          <Button 
+            onClick={handleConfirmSync} 
+            variant="contained" 
+            color="primary"
+            disabled={syncLoading}
+            startIcon={syncLoading ? <CircularProgress size={20} /> : null}
+          >
+            Sync Job
+          </Button>
+        </DialogActions>
+      </Dialog>
+    </Paper>
+  );
+};
+
+export default KickservJobs;
+```
+
+Let's also add API service functions to handle the Kickserv integration on the frontend:
+
+```javascript
+// src/api/integrations.js
+import api from './index';
+
+// Kickserv Integration
+export const fetchKickservSettings = async () => {
+  return api.get('/api/integrations/kickserv/settings');
+};
+
+export const saveKickservSettings = async (settings) => {
+  return api.post('/api/integrations/kickserv/settings', settings);
+};
+
+export const testKickservConnection = async (credentials) => {
+  return api.post('/api/integrations/kickserv/test-connection', credentials);
+};
+
+export const fetchKickservJobs = async (queryParams = '') => {
+  return api.get(`/api/integrations/kickserv/jobs${queryParams ? '?' + queryParams : ''}`);
+};
+
+export const syncServiceRequest = async (serviceRequest) => {
+  return api.post('/api/integrations/kickserv/service-requests', serviceRequest);
+};
+
+export const syncCustomer = async (customer) => {
+  return api.post('/api/integrations/kickserv/sync-customer', customer);
+};
+```
+
+## Integration Dashboard
+
+Finally, let's create a Kickserv integration dashboard page that brings everything together:
+
+```jsx
+// src/pages/integrations/Kickserv.jsx
+import React, { useState } from 'react';
+import { 
+  Box, 
+  Container, 
+  Typography,
+  Paper,
+  Tabs,
+  Tab,
+  Divider,
+  Button,
+  Alert
+} from '@mui/material';
+import KickservSettings from '../../components/integrations/KickservSettings';
+import KickservJobs from '../../components/integrations/KickservJobs';
+
+const KickservIntegration = () => {
+  const [activeTab, setActiveTab] = useState(0);
+  const [isConfigured, setIsConfigured] = useState(false);
+  
+  const handleTabChange = (event, newValue) => {
+    setActiveTab(newValue);
+  };
+  
+  return (
+    <Container maxWidth="lg" sx={{ mt: 4, mb: 4 }}>
+      <Typography variant="h4" gutterBottom>
+        Kickserv Integration
+      </Typography>
+      
+      <Typography variant="body1" color="textSecondary" paragraph>
+        Integrate your appliance repair business with Kickserv to synchronize customers, jobs, and schedules.
+      </Typography>
+      
+      <Box sx={{ mb: 4 }}>
+        <Paper sx={{ mb: 3 }}>
+          <Tabs
+            value={activeTab}
+            onChange={handleTabChange}
+            indicatorColor="primary"
+            textColor="primary"
+          >
+            <Tab label="Settings" />
+            <Tab label="Jobs" disabled={!isConfigured} />
+            <Tab label="Sync History" disabled={!isConfigured} />
+          </Tabs>
+          
+          <Divider />
+          
+          <Box sx={{ p: 0 }}>
+            {activeTab === 0 && (
+              <KickservSettings onConfigured={() => setIsConfigured(true)} />
+            )}
+            
+            {activeTab === 1 && (
+              <KickservJobs />
+            )}
+            
+            {activeTab === 2 && (
+              <Box sx={{ p: 3 }}>
+                <Typography variant="h6" gutterBottom>
+                  Synchronization History
+                </Typography>
+                
+                <Alert severity="info">
+                  Synchronization history feature is coming soon.
+                </Alert>
+              </Box>
+            )}
+          </Box>
+        </Paper>
+      </Box>
+    </Container>
+  );
+};
+
+export default KickservIntegration;
+```
+
+## Additional Configuration for the Kickserv Integration
+
+Let's add the necessary configuration to our `config.yaml` file to support the Kickserv integration:
+
+```yaml
+# config/agent_system.yaml
+llm:
+  executive_agent: "claude-3-7-sonnet"
+  manager_agents: "gpt-4o"
+  task_agents: "gpt-4o-mini"
+
+integrations:
+  ghl:
+    enabled: true
+    api_key: "${GHL_API_KEY}"
+    location_id: "${GHL_LOCATION_ID}"
+    base_url: "https://rest.gohighlevel.com"
+    
+  kickserv:
+    enabled: true
+    api_token: "${KICKSERV_API_TOKEN}"
+    account_slug: "${KICKSERV_ACCOUNT_SLUG}"
+    base_url: "https://app.kickserv.com"
+```
+
+## Dockerfile Updates
+
+Update the Dockerfile to include the necessary environment variables for Kickserv:
+
+```dockerfile
+# backend/Dockerfile
+FROM python:3.10-slim
+
+WORKDIR /app
+
+# Install system dependencies
+RUN apt-get update && apt-get install -y \
+    build-essential \
+    libpq-dev \
+    && apt-get clean \
+    && rm -rf /var/lib/apt/lists/*
+
+# Install Python dependencies
+COPY requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt
+
+# Copy application code
+COPY . .
+
+# Environment variables
+ENV KICKSERV_API_TOKEN=${KICKSERV_API_TOKEN}
+ENV KICKSERV_ACCOUNT_SLUG=${KICKSERV_ACCOUNT_SLUG}
+
+# Expose API port
+EXPOSE 8000
+
+# Run the application
+CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000"]
+```
+
+## Docker Compose Updates
+
+Update the docker-compose.yml file to include the Kickserv environment variables:
+
+```yaml
+# docker-compose.yml
+version: '3.8'
+
+services:
+  # API Server
+  api:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    ports:
+      - "8000:8000"
+    environment:
+      - POSTGRES_HOST=postgres
+      - POSTGRES_DB=openmanus
+      - POSTGRES_USER=openmanus
+      - POSTGRES_PASSWORD=${DB_PASSWORD}
+      - MONGO_URI=mongodb://mongo:27017/openmanus
+      - REDIS_HOST=redis
+      - RABBITMQ_HOST=rabbitmq
+      - JWT_SECRET=${JWT_SECRET}
+      - LLM_API_KEY=${LLM_API_KEY}
+      - GHL_API_KEY=${GHL_API_KEY}
+      - GHL_LOCATION_ID=${GHL_LOCATION_ID}
+      - KICKSERV_API_TOKEN=${KICKSERV_API_TOKEN}
+      - KICKSERV_ACCOUNT_SLUG=${KICKSERV_ACCOUNT_SLUG}
+    volumes:
+      - ./backend:/app
+      - ./config:/app/config
+    depends_on:
+      - postgres
+      - mongo
+      - redis
+      - rabbitmq
+    restart: always
+```
+
+## Conclusion: Kickserv Integration
+
+This implementation provides a comprehensive integration with Kickserv, allowing our AI agent system to:
+
+1. **Synchronize Customers**: Automatically create or update customers in Kickserv when they are created or updated in our system.
+2. **Manage Jobs**: Create, update, and retrieve jobs in Kickserv.
+3. **View Schedules**: Access the scheduling information from Kickserv to coordinate with technicians.
+4. **Track Time**: Log time entries for jobs to maintain accurate billing records.
+
+The Kickserv Manager Agent acts as a mediator between our AI agent system and the Kickserv API, handling all the necessary conversions and API calls. The frontend components provide a user-friendly interface for managing the integration settings and viewing synchronized data.
+
+This integration enhances our appliance repair business automation system by leveraging existing Kickserv functionality while adding the power of our AI agent architecture. It provides a seamless experience for users who are already familiar with Kickserv while adding new capabilities through our hierarchical AI agent system.
+
+Key features of this integration include:
+- XML handling for Kickserv's API format
+- Comprehensive error handling and logging
+- Customizable API client with authentication
+- User-friendly integration settings and management interface
+- Job synchronization for bidirectional data flow
+- Flexible filtering and search capabilities
+
+With this implementation, the appliance repair business can maintain their existing Kickserv workflow while benefiting from the enhanced capabilities of our AI agent system.
+
+User Interface Development
+
+The UI will be developed using React with Material UI for a professional appearance and responsive design. Here are the key components:
+Project Structure
+frontend/
+├── public/
+│   ├── index.html
+│   ├── favicon.ico
+│   └── assets/
+├── src/
+│   ├── api/
+│   │   ├── index.js
+│   │   ├── auth.js
+│   │   ├── customers.js
+│   │   ├── service-requests.js
+│   │   └── agents.js
+│   ├── components/
+│   │   ├── common/
+│   │   │   ├── Header.jsx
+│   │   │   ├── Sidebar.jsx
+│   │   │   ├── Footer.jsx
+│   │   │   └── Loading.jsx
+│   │   ├── customers/
+│   │   │   ├── CustomerList.jsx
+│   │   │   ├── CustomerForm.jsx
+│   │   │   └── CustomerDetail.jsx
+│   │   ├── service-requests/
+│   │   │   ├── ServiceRequestList.jsx
+│   │   │   ├── ServiceRequestForm.jsx
+│   │   │   └── ServiceRequestDetail.jsx
+│   │   ├── appointments/
+│   │   │   ├── AppointmentCalendar.jsx
+│   │   │   ├── AppointmentForm.jsx
+│   │   │   └── AppointmentDetail.jsx
+│   │   ├── agents/
+│   │   │   ├── AgentDashboard.jsx
+│   │   │   ├── WorkflowVisualizer.jsx
+│   │   │   └── AgentLogs.jsx
+│   │   └── reports/
+│   │       ├── FinancialReport.jsx
+│   │       ├── ServiceReport.jsx
+│   │       └── PerformanceReport.jsx
+│   ├── contexts/
+│   │   ├── AuthContext.jsx
+│   │   ├── AgentContext.jsx
+│   │   └── NotificationContext.jsx
+│   ├── hooks/
+│   │   ├── useAuth.js
+│   │   ├── useApi.js
+│   │   └── useLocalStorage.js
+│   ├── pages/
+│   │   ├── Dashboard.jsx
+│   │   ├── Customers.jsx
+│   │   ├── ServiceRequests.jsx
+│   │   ├── Appointments.jsx
+│   │   ├── Inventory.jsx
+│   │   ├── Invoices.jsx
+│   │   ├── Reports.jsx
+│   │   ├── Settings.jsx
+│   │   └── Login.jsx
+│   ├── theme/
+│   │   ├── index.js
+│   │   ├── palette.js
+│   │   └── typography.js
+│   ├── utils/
+│   │   ├── formatters.js
+│   │   ├── validators.js
+│   │   └── helpers.js
+│   ├── App.jsx
+│   ├── index.jsx
+│   └── Routes.jsx
+├── package.json
+└── README.md
+Key UI Implementations
+1. Dashboard Component
+// src/pages/Dashboard.jsx
+import React, { useEffect, useState } from 'react';
+import { Grid, Paper, Typography, Box, Card, CardContent, Button } from '@mui/material';
+import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from 'recharts';
+import { fetchDashboardData } from '../api';
+
+const Dashboard = () => {
+  const [dashboardData, setDashboardData] = useState({
+    pendingRequests: 0,
+    upcomingAppointments: [],
+    monthlyRevenue: [],
+    agentActivity: []
+  });
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    const loadDashboardData = async () => {
+      try {
+        setLoading(true);
+        const data = await fetchDashboardData();
+        setDashboardData(data);
+      } catch (error) {
+        console.error('Error fetching dashboard data:', error);
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    loadDashboardData();
+  }, []);
+
+  return (
+    <Box sx={{ flexGrow: 1, p: 3 }}>
+      <Typography variant="h4" gutterBottom>
+        Dashboard
+      </Typography>
+
+      {/* Summary Cards */}
+      <Grid container spacing={3} sx={{ mb: 4 }}>
+        <Grid item xs={12} sm={6} md={3}>
+          <Card sx={{ height: '100%' }}>
+            <CardContent>
+              <Typography color="textSecondary" gutterBottom>
+                Pending Service Requests
+              </Typography>
+              <Typography variant="h3">
+                {dashboardData.pendingRequests}
+              </Typography>
+              <Button size="small" color="primary" sx={{ mt: 2 }}>
+                View All
+              </Button>
+            </CardContent>
+          </Card>
+        </Grid>
+
+        <Grid item xs={12} sm={6} md={3}>
+          <Card sx={{ height: '100%' }}>
+            <CardContent>
+              <Typography color="textSecondary" gutterBottom>
+                Today's Appointments
+              </Typography>
+              <Typography variant="h3">
+                {dashboardData.upcomingAppointments.filter(a => 
+                  new Date(a.date).toDateString() === new Date().toDateString()
+                ).length}
+              </Typography>
+              <Button size="small" color="primary" sx={{ mt: 2 }}>
+                View Schedule
+              </Button>
+            </CardContent>
+          </Card>
+        </Grid>
+
+        <Grid item xs={12} sm={6} md={3}>
+          <Card sx={{ height: '100%' }}>
+            <CardContent>
+              <Typography color="textSecondary" gutterBottom>
+                Active Workflows
+              </Typography>
+              <Typography variant="h3">
+                {dashboardData.agentActivity.filter(a => a.status === 'active').length}
+              </Typography>
+              <Button size="small" color="primary" sx={{ mt: 2 }}>
+                View Workflows
+              </Button>
+            </CardContent>
+          </Card>
+        </Grid>
+
+        <Grid item xs={12} sm={6} md={3}>
+          <Card sx={{ height: '100%' }}>
+            <CardContent>
+              <Typography color="textSecondary" gutterBottom>
+                This Month's Revenue
+              </Typography>
+              <Typography variant="h3">
+                ${dashboardData.monthlyRevenue.reduce((sum, item) => sum + item.amount, 0).toLocaleString()}
+              </Typography>
+              <Button size="small" color="primary" sx={{ mt: 2 }}>
+                Financial Reports
+              </Button>
+            </CardContent>
+          </Card>
+        </Grid>
+      </Grid>
+
+      {/* Revenue Chart */}
+      <Grid container spacing={3}>
+        <Grid item xs={12} md={8}>
+          <Paper sx={{ p: 2, display: 'flex', flexDirection: 'column' }}>
+            <Typography variant="h6" gutterBottom>
+              Monthly Revenue
+            </Typography>
+            <ResponsiveContainer width="100%" height={300}>
+              <BarChart
+                data={dashboardData.monthlyRevenue}
+                margin={{
+                  top: 5,
+                  right: 30,
+                  left: 20,
+                  bottom: 5,
+                }}
+              >
+                <CartesianGrid strokeDasharray="3 3" />
+                <XAxis dataKey="month" />
+                <YAxis />
+                <Tooltip />
+                <Legend />
+                <Bar dataKey="amount" fill="#8884d8" name="Revenue ($)" />
+              </BarChart>
+            </ResponsiveContainer>
+          </Paper>
+        </Grid>
+
+        {/* Upcoming Appointments */}
+        <Grid item xs={12} md={4}>
+          <Paper sx={{ p: 2, display: 'flex', flexDirection: 'column' }}>
+            <Typography variant="h6" gutterBottom>
+              Upcoming Appointments
+            </Typography>
+            <Box sx={{ overflow: 'auto', maxHeight: 300 }}>
+              {dashboardData.upcomingAppointments.map((appointment) => (
+                <Box
+                  key={appointment.id}
+                  sx={{
+                    p: 1,
+                    mb: 1,
+                    border: '1px solid #eee',
+                    borderRadius: 1,
+                  }}
+                >
+                  <Typography variant="subtitle2">{appointment.customerName}</Typography>
+                  <Typography variant="body2" color="textSecondary">
+                    {new Date(appointment.date).toLocaleDateString()} - {appointment.time}
+                  </Typography>
+                  <Typography variant="body2">{appointment.serviceType}</Typography>
+                </Box>
+              ))}
+            </Box>
+            <Button color="primary" sx={{ mt: 1 }}>
+              View All Appointments
+            </Button>
+          </Paper>
+        </Grid>
+      </Grid>
+    </Box>
+  );
+};
+
+export default Dashboard;
+2. Agent Workflow Visualizer
+// src/components/agents/WorkflowVisualizer.jsx
+import React, { useState, useEffect } from 'react';
+import { Box, Paper, Typography, Chip, Divider, CircularProgress, Button } from '@mui/material';
+import { Timeline, TimelineItem, TimelineSeparator, TimelineConnector, TimelineContent, TimelineDot } from '@mui/lab';
+import { fetchWorkflowDetails } from '../../api/agents';
+
+const WorkflowVisualizer = ({ workflowId }) => {
+  const [workflow, setWorkflow] = useState(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(null);
+
+  useEffect(() => {
+    const loadWorkflow = async () => {
+      try {
+        setLoading(true);
+        const data = await fetchWorkflowDetails(workflowId);
+        setWorkflow(data);
+        setError(null);
+      } catch (err) {
+        setError('Failed to load workflow details');
+        console.error(err);
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    if (workflowId) {
+      loadWorkflow();
+    }
+  }, [workflowId]);
+
+  if (loading) {
+    return (
+      <Box sx={{ display: 'flex', justifyContent: 'center', p: 3 }}>
+        <CircularProgress />
+      </Box>
+    );
+  }
+
+  if (error) {
+    return (
+      <Box sx={{ p: 3 }}>
+        <Typography color="error">{error}</Typography>
+        <Button variant="outlined" sx={{ mt: 2 }} onClick={() => window.location.reload()}>
+          Try Again
+        </Button>
+      </Box>
+    );
+  }
+
+  if (!workflow) {
+    return (
+      <Box sx={{ p: 3 }}>
+        <Typography>No workflow selected</Typography>
+      </Box>
+    );
+  }
+
+  return (
+    <Paper sx={{ p: 3, mb: 3 }}>
+      <Box sx={{ mb: 3 }}>
+        <Typography variant="h5">Workflow: {workflow.id}</Typography>
+        <Box sx={{ display: 'flex', alignItems: 'center', mt: 1 }}>
+          <Chip 
+            label={workflow.status} 
+            color={
+              workflow.status === 'completed' ? 'success' : 
+              workflow.status === 'failed' ? 'error' : 
+              workflow.status === 'in_progress' ? 'primary' : 'default'
+            } 
+            sx={{ mr: 2 }}
+          />
+          <Typography variant="body2" color="textSecondary">
+            Started: {new Date(workflow.started_at).toLocaleString()}
+          </Typography>
+          {workflow.completed_at && (
+            <Typography variant="body2" color="textSecondary" sx={{ ml: 2 }}>
+              Completed: {new Date(workflow.completed_at).toLocaleString()}
+            </Typography>
+          )}
+        </Box>
+      </Box>
+
+      <Divider sx={{ mb: 3 }} />
+
+      <Box sx={{ mb: 3 }}>
+        <Typography variant="h6">Original Request</Typography>
+        <Paper variant="outlined" sx={{ p: 2, mt: 1, backgroundColor: '#f5f5f5' }}>
+          <Typography variant="body1">{workflow.request.content}</Typography>
+        </Paper>
+      </Box>
+
+      <Box sx={{ mb: 3 }}>
+        <Typography variant="h6">Workflow Plan</Typography>
+        <Paper variant="outlined" sx={{ p: 2, mt: 1 }}>
+          <Typography variant="subtitle1">Primary Domain: {workflow.plan.domain}</Typography>
+          <Typography variant="subtitle1">Priority: {workflow.plan.priority}</Typography>
+          
+          <Typography variant="subtitle1" sx={{ mt: 2 }}>Required Agents:</Typography>
+          <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 1, mt: 1 }}>
+            {workflow.plan.required_agents.map((agent, index) => (
+              <Chip key={index} label={agent} />
+            ))}
+          </Box>
+        </Paper>
+      </Box>
+
+      <Box>
+        <Typography variant="h6">Execution Steps</Typography>
+        <Timeline position="right" sx={{ mt: 2 }}>
+          {workflow.steps.map((step, index) => (
+            <TimelineItem key={index}>
+              <TimelineSeparator>
+                <TimelineDot 
+                  color={
+                    step.status === 'completed' ? 'success' : 
+                    step.status === 'failed' ? 'error' : 
+                    step.status === 'in_progress' ? 'primary' : 'grey'
+                  } 
+                />
+                {index < workflow.steps.length - 1 && <TimelineConnector />}
+              </TimelineSeparator>
+              <TimelineContent>
+                <Paper sx={{ p: 2, mb: 2 }} elevation={1}>
+                  <Typography variant="subtitle1">{step.type}</Typography>
+                  <Typography variant="body2" color="textSecondary">
+                    Agent: {step.agent_type} - {step.agent_name}
+                  </Typography>
+                  <Typography variant="body2" color="textSecondary">
+                    Status: {step.status}
+                  </Typography>
+                  
+                  {step.status === 'completed' && step.result && (
+                    <Box sx={{ mt: 2 }}>
+                      <Typography variant="subtitle2">Result:</Typography>
+                      <Paper variant="outlined" sx={{ p: 1, mt: 1, maxHeight: 200, overflow: 'auto', backgroundColor: '#f5f5f5' }}>
+                        <pre style={{ margin: 0, fontFamily: 'monospace', fontSize: '0.8rem', whiteSpace: 'pre-wrap' }}>
+                          {JSON.stringify(step.result, null, 2)}
+                        </pre>
+                      </Paper>
+                    </Box>
+                  )}
+                  
+                  {step.status === 'failed' && step.error && (
+                    <Box sx={{ mt: 2 }}>
+                      <Typography variant="subtitle2" color="error">Error:</Typography>
+                      <Paper variant="outlined" sx={{ p:.5, mt: .5, backgroundColor: '#fff8f8' }}>
+                        <Typography color="error" variant="body2">
+                          {step.error}
+                        </Typography>
+                      </Paper>
+                    </Box>
+                  )}
+                </Paper>
+              </TimelineContent>
+            </TimelineItem>
+          ))}
+        </Timeline>
+      </Box>
+
+      {workflow.response && (
+        <Box sx={{ mt: 3 }}>
+          <Typography variant="h6">Final Response</Typography>
+          <Paper variant="outlined" sx={{ p: 2, mt: 1, backgroundColor: '#f0f7ff' }}>
+            <Typography variant="body1">{workflow.response.content}</Typography>
+          </Paper>
+        </Box>
+      )}
+    </Paper>
+  );
+};
+
+export default WorkflowVisualizer;
+3. Service Request Form
+// src/components/service-requests/ServiceRequestForm.jsx
+import React, { useState, useEffect } from 'react';
+import { 
+  Box, 
+  Paper, 
+  Typography, 
+  TextField, 
+  Button, 
+  FormControl, 
+  InputLabel, 
+  Select, 
+  MenuItem, 
+  Grid,
+  Autocomplete,
+  CircularProgress,
+  Stepper,
+  Step,
+  StepLabel,
+  FormHelperText
+} from '@mui/material';
+import { fetchCustomers, createServiceRequest } from '../../api';
+
+const ServiceRequestForm = ({ onSuccess }) => {
+  const [activeStep, setActiveStep] = useState(0);
+  const [loading, setLoading] = useState(false);
+  const [customers, setCustomers] = useState([]);
+  const [formData, setFormData] = useState({
+    customer_id: '',
+    appliance_type: '',
+    appliance_brand: '',
+    appliance_model: '',
+    issue_description: '',
+    priority: 'medium',
+    preferred_date: '',
+    preferred_time: '',
+    notes: '',
+    status: 'pending'
+  });
+  const [errors, setErrors] = useState({});
+  const [customerSearchQuery, setCustomerSearchQuery] = useState('');
+  const [selectedCustomer, setSelectedCustomer] = useState(null);
+  const [customerLoading, setCustomerLoading] = useState(false);
+
+  useEffect(() => {
+    const loadCustomers = async () => {
+      try {
+        setCustomerLoading(true);
+        const data = await fetchCustomers(customerSearchQuery);
+        setCustomers(data);
+      } catch (error) {
+        console.error('Error fetching customers:', error);
+      } finally {
+        setCustomerLoading(false);
+      }
+    };
+
+    loadCustomers();
+  }, [customerSearchQuery]);
+
+  const handleInputChange = (e) => {
+    const { name, value } = e.target;
+    setFormData({
+      ...formData,
+      [name]: value
+    });
+    // Clear error when field is edited
+    if (errors[name]) {
+      setErrors({
+        ...errors,
+        [name]: ''
+      });
+    }
+  };
+
+  const handleCustomerSelect = (event, customer) => {
+    setSelectedCustomer(customer);
+    if (customer) {
+      setFormData({
+        ...formData,
+        customer_id: customer.id
+      });
+      // Clear error when field is edited
+      if (errors.customer_id) {
+        setErrors({
+          ...errors,
+          customer_id: ''
+        });
+      }
+    } else {
+      setFormData({
+        ...formData,
+        customer_id: ''
+      });
+    }
+  };
+
+  const validateStep = (step) => {
+    let stepErrors = {};
+    let isValid = true;
+
+    if (step === 0) {
+      // Validate customer information
+      if (!formData.customer_id) {
+        stepErrors.customer_id = 'Customer is required';
+        isValid = false;
+      }
+    } else if (step === 1) {
+      // Validate appliance information
+      if (!formData.appliance_type) {
+        stepErrors.appliance_type = 'Appliance type is required';
+        isValid = false;
+      }
+      if (!formData.appliance_brand) {
+        stepErrors.appliance_brand = 'Appliance brand is required';
+        isValid = false;
+      }
+    } else if (step === 2) {
+      // Validate service details
+      if (!formData.issue_description) {
+        stepErrors.issue_description = 'Issue description is required';
+        isValid = false;
+      }
+      if (!formData.priority) {
+        stepErrors.priority = 'Priority is required';
+        isValid = false;
+      }
+    }
+
+    setErrors(stepErrors);
+    return isValid;
+  };
+
+  const handleNext = () => {
+    if (validateStep(activeStep)) {
+      setActiveStep((prevStep) => prevStep + 1);
+    }
+  };
+
+  const handleBack = () => {
+    setActiveStep((prevStep) => prevStep - 1);
+  };
+
+  const handleSubmit = async (e) => {
+    e.preventDefault();
+    
+    if (!validateStep(activeStep)) {
+      return;
+    }
+
+    try {
+      setLoading(true);
+      const result = await createServiceRequest(formData);
+      
+      if (onSuccess) {
+        onSuccess(result);
+      }
+      
+      // Reset form after successful submission
+      setFormData({
+        customer_id: '',
+        appliance_type: '',
+        appliance_brand: '',
+        appliance_model: '',
+        issue_description: '',
+        priority: 'medium',
+        preferred_date: '',
+        preferred_time: '',
+        notes: '',
+        status: 'pending'
+      });
+      setActiveStep(0);
+      setSelectedCustomer(null);
+    } catch (error) {
+      console.error('Error creating service request:', error);
+      setErrors({
+        submit: 'Failed to create service request. Please try again.'
+      });
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const steps = ['Customer Information', 'Appliance Details', 'Service Details', 'Review'];
+
+  return (
+    <Paper sx={{ p: 3 }}>
+      <Typography variant="h5" gutterBottom>
+        Create Service Request
+      </Typography>
+
+      <Stepper activeStep={activeStep} sx={{ mb: 4, mt: 2 }}>
+        {steps.map((label) => (
+          <Step key={label}>
+            <StepLabel>{label}</StepLabel>
+          </Step>
+        ))}
+      </Stepper>
+
+      <form onSubmit={handleSubmit}>
+        {activeStep === 0 && (
+          <Box>
+            <Typography variant="h6" gutterBottom>
+              Customer Information
+            </Typography>
+            
+            <Autocomplete
+              value={selectedCustomer}
+              onChange={handleCustomerSelect}
+              inputValue={customerSearchQuery}
+              onInputChange={(event, newInputValue) => {
+                setCustomerSearchQuery(newInputValue);
+              }}
+              options={customers}
+              getOptionLabel={(option) => `${option.first_name} ${option.last_name} (${option.email})`}
+              loading={customerLoading}
+              renderInput={(params) => (
+                <TextField
+                  {...params}
+                  label="Search Customers"
+                  variant="outlined"
+                  fullWidth
+                  margin="normal"
+                  error={!!errors.customer_id}
+                  helperText={errors.customer_id}
+                  InputProps={{
+                    ...params.InputProps,
+                    endAdornment: (
+                      <>
+                        {customerLoading ? <CircularProgress color="inherit" size={20} /> : null}
+                        {params.InputProps.endAdornment}
+                      </>
+                    ),
+                  }}
+                />
+              )}
+            />
+            
+            <Button
+              variant="contained"
+              color="primary"
+              sx={{ mt: 2 }}
+              href="/customers/new"
+            >
+              Create New Customer
+            </Button>
+          </Box>
+        )}
+        
+        {activeStep === 1 && (
+          <Box>
+            <Typography variant="h6" gutterBottom>
+              Appliance Details
+            </Typography>
+            
+            <Grid container spacing={2}>
+              <Grid item xs={12} md={4}>
+                <FormControl fullWidth margin="normal" error={!!errors.appliance_type}>
+                  <InputLabel id="appliance-type-label">Appliance Type</InputLabel>
+                  <Select
+                    labelId="appliance-type-label"
+                    name="appliance_type"
+                    value={formData.appliance_type}
+                    onChange={handleInputChange}
+                    label="Appliance Type"
+                  >
+                    <MenuItem value="refrigerator">Refrigerator</MenuItem>
+                    <MenuItem value="washer">Washer</MenuItem>
+                    <MenuItem value="dryer">Dryer</MenuItem>
+                    <MenuItem value="dishwasher">Dishwasher</MenuItem>
+                    <MenuItem value="oven">Oven</MenuItem>
+                    <MenuItem value="stove">Stove</MenuItem>
+                    <MenuItem value="microwave">Microwave</MenuItem>
+                    <MenuItem value="garbage_disposal">Garbage Disposal</MenuItem>
+                    <MenuItem value="hvac">HVAC System</MenuItem>
+                    <MenuItem value="other">Other</MenuItem>
+                  </Select>
+                  {errors.appliance_type && <FormHelperText>{errors.appliance_type}</FormHelperText>}
+                </FormControl>
+              </Grid>
+              
+              <Grid item xs={12} md={4}>
+                <TextField
+                  name="appliance_brand"
+                  label="Brand"
+                  value={formData.appliance_brand}
+                  onChange={handleInputChange}
+                  fullWidth
+                  margin="normal"
+                  error={!!errors.appliance_brand}
+                  helperText={errors.appliance_brand}
+                />
+              </Grid>
+              
+              <Grid item xs={12} md={4}>
+                <TextField
+                  name="appliance_model"
+                  label="Model"
+                  value={formData.appliance_model}
+                  onChange={handleInputChange}
+                  fullWidth
+                  margin="normal"
+                />
+              </Grid>
+            </Grid>
+          </Box>
+        )}
+        
+        {activeStep === 2 && (
+          <Box>
+            <Typography variant="h6" gutterBottom>
+              Service Details
+            </Typography>
+            
+            <TextField
+              name="issue_description"
+              label="Issue Description"
+              value={formData.issue_description}
+              onChange={handleInputChange}
+              fullWidth
+              multiline
+              rows={4}
+              margin="normal"
+              error={!!errors.issue_description}
+              helperText={errors.issue_description}
+            />
+            
+            <Grid container spacing={2}>
+              <Grid item xs={12} md={4}>
+                <FormControl fullWidth margin="normal" error={!!errors.priority}>
+                  <InputLabel id="priority-label">Priority</InputLabel>
+                  <Select
+                    labelId="priority-label"
+                    name="priority"
+                    value={formData.priority}
+                    onChange={handleInputChange}
+                    label="Priority"
+                  >
+                    <MenuItem value="low">Low</MenuItem>
+                    <MenuItem value="medium">Medium</MenuItem>
+                    <MenuItem value="high">High</MenuItem>
+                    <MenuItem value="urgent">Urgent</MenuItem>
+                  </Select>
+                  {errors.priority && <FormHelperText>{errors.priority}</FormHelperText>}
+                </FormControl>
+              </Grid>
+              
+              <Grid item xs={12} md={4}>
+                <TextField
+                  name="preferred_date"
+                  label="Preferred Date"
+                  type="date"
+                  value={formData.preferred_date}
+                  onChange={handleInputChange}
+                  fullWidth
+                  margin="normal"
+                  InputLabelProps={{
+                    shrink: true,
+                  }}
+                />
+              </Grid>
+              
+              <Grid item xs={12} md={4}>
+                <TextField
+                  name="preferred_time"
+                  label="Preferred Time"
+                  type="time"
+                  value={formData.preferred_time}
+                  onChange={handleInputChange}
+                  fullWidth
+                  margin="normal"
+                  InputLabelProps={{
+                    shrink: true,
+                  }}
+                />
+              </Grid>
+            </Grid>
+            
+            <TextField
+              name="notes"
+              label="Additional Notes"
+              value={formData.notes}
+              onChange={handleInputChange}
+              fullWidth
+              multiline
+              rows={2}
+              margin="normal"
+            />
+          </Box>
+        )}
+        
+        {activeStep === 3 && (
+          <Box>
+            <Typography variant="h6" gutterBottom>
+              Review Service Request
+            </Typography>
+            
+            <Paper variant="outlined" sx={{ p: 2, mb: 3 }}>
+              <Grid container spacing={2}>
+                <Grid item xs={12} md={6}>
+                  <Typography variant="subtitle1">Customer</Typography>
+                  <Typography variant="body2">
+                    {selectedCustomer ? `${selectedCustomer.first_name} ${selectedCustomer.last_name}` : 'Not selected'}
+                  </Typography>
+                </Grid>
+                
+                <Grid item xs={12} md={6}>
+                  <Typography variant="subtitle1">Appliance</Typography>
+                  <Typography variant="body2">
+                    {formData.appliance_type ? (
+                      `${formData.appliance_type.charAt(0).toUpperCase() + formData.appliance_type.slice(1)} - ${formData.appliance_brand} ${formData.appliance_model}`
+                    ) : 'Not specified'}
+                  </Typography>
+                </Grid>
+                
+                <Grid item xs={12}>
+                  <Typography variant="subtitle1">Issue Description</Typography>
+                  <Typography variant="body2">
+                    {formData.issue_description || 'Not provided'}
+                  </Typography>
+                </Grid>
+                
+                <Grid item xs={12} md={4}>
+                  <Typography variant="subtitle1">Priority</Typography>
+                  <Typography variant="body2">
+                    {formData.priority.charAt(0).toUpperCase() + formData.priority.slice(1)}
+                  </Typography>
+                </Grid>
+                
+                <Grid item xs={12} md={4}>
+                  <Typography variant="subtitle1">Preferred Date</Typography>
+                  <Typography variant="body2">
+                    {formData.preferred_date || 'Not specified'}
+                  </Typography>
+                </Grid>
+                
+                <Grid item xs={12} md={4}>
+                  <Typography variant="subtitle1">Preferred Time</Typography>
+                  <Typography variant="body2">
+                    {formData.preferred_time || 'Not specified'}
+                  </Typography>
+                </Grid>
+                
+                {formData.notes && (
+                  <Grid item xs={12}>
+                    <Typography variant="subtitle1">Additional Notes</Typography>
+                    <Typography variant="body2">{formData.notes}</Typography>
+                  </Grid>
+                )}
+              </Grid>
+            </Paper>
+            
+            {errors.submit && (
+              <Typography color="error" sx={{ mb: 2 }}>
+                {errors.submit}
+              </Typography>
+            )}
+          </Box>
+        )}
+        
+        <Box sx={{ display: 'flex', justifyContent: 'space-between', mt: 3 }}>
+          <Button
+            disabled={activeStep === 0}
+            onClick={handleBack}
+          >
+            Back
+          </Button>
+          
+          <Box>
+            {activeStep === steps.length - 1 ? (
+              <Button
+                variant="contained"
+                color="primary"
+                type="submit"
+                disabled={loading}
+                sx={{ ml: 1 }}
+              >
+                {loading ? <CircularProgress size={24} /> : 'Submit'}
+              </Button>
+            ) : (
+              <Button
+                variant="contained"
+                color="primary"
+                onClick={handleNext}
+                sx={{ ml: 1 }}
+              >
+                Next
+              </Button>
+            )}
+          </Box>
+        </Box>
+      </form>
+    </Paper>
+  );
+};
+
+export default ServiceRequestForm;
+
+
+API Interface Implementation
+// src/api/index.js
+import axios from 'axios';
+import { getAuthToken } from './auth';
+
+const API_BASE_URL = process.env.REACT_APP_API_URL || 'http://localhost:8000';
+
+// Create axios instance with default config
+const api = axios.create({
+  baseURL: API_BASE_URL,
+  headers: {
+    'Content-Type': 'application/json'
+  }
+});
+
+// Request interceptor to add auth token
+api.interceptors.request.use(
+  (config) => {
+    const token = getAuthToken();
+    if (token) {
+      config.headers.Authorization = `Bearer ${token}`;
+    }
+    return config;
+  },
+  (error) => Promise.reject(error)
+);
+
+// Response interceptor to handle common errors
+api.interceptors.response.use(
+  (response) => response.data,
+  (error) => {
+    // Handle specific error codes
+    if (error.response) {
+      if (error.response.status === 401) {
+        // Redirect to login if unauthorized
+        window.location.href = '/login';
+      }
+    }
+    return Promise.reject(error);
+  }
+);
+
+export default api;
+
+// src/api/agents.js
+import api from './index';
+
+export const processWithExecutiveAgent = async (request) => {
+  return api.post('/api/agents/executive', request);
+};
+
+export const fetchWorkflowDetails = async (workflowId) => {
+  return api.get(`/api/workflows/${workflowId}`);
+};
+
+export const fetchActiveWorkflows = async () => {
+  return api.get('/api/workflows?status=active');
+};
+
+export const fetchCompletedWorkflows = async (page = 1, limit = 10) => {
+  return api.get(`/api/workflows?status=completed&page=${page}&limit=${limit}`);
+};
+
+export const fetchAgentPerformanceMetrics = async (timeRange = 'week') => {
+  return api.get(`/api/metrics/agents?timeRange=${timeRange}`);
+};
+
+export const fetchDashboardData = async () => {
+  // Fetch all dashboard data in a single request for efficiency
+  return api.get('/api/dashboard');
+};
+
+
+The system's frontend will communicate with the backend through a RESTful API. Here are the key API implementation files:
+Deployment Strategy
+Docker Containerization
+The system will be containerized using Docker to ensure consistent environments across development, testing, and production stages.
+Docker Compose Configuration
+# docker-compose.yml
+version: '3.8'
+
+services:
+  # API Server
+  api:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    ports:
+      - "8000:8000"
+    environment:
+      - POSTGRES_HOST=postgres
+      - POSTGRES_DB=openmanus
+      - POSTGRES_USER=openmanus
+      - POSTGRES_PASSWORD=${DB_PASSWORD}
+      - MONGO_URI=mongodb://mongo:27017/openmanus
+      - REDIS_HOST=redis
+      - RABBITMQ_HOST=rabbitmq
+      - JWT_SECRET=${JWT_SECRET}
+      - LLM_API_KEY=${LLM_API_KEY}
+      - GHL_API_KEY=${GHL_API_KEY}
+      - GHL_LOCATION_ID=${GHL_LOCATION_ID}
+    volumes:
+      - ./backend:/app
+      - ./config:/app/config
+    depends_on:
+      - postgres
+      - mongo
+      - redis
+      - rabbitmq
+    restart: always
+
+  # Frontend
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    ports:
+      - "3000:80"
+    environment:
+      - REACT_APP_API_URL=http://localhost:8000
+    volumes:
+      - ./frontend:/app
+    depends_on:
+      - api
+    restart: always
+
+  # PostgreSQL Database
+  postgres:
+    image: postgres:14
+    ports:
+      - "5432:5432"
+    environment:
+      - POSTGRES_DB=openmanus
+      - POSTGRES_USER=openmanus
+      - POSTGRES_PASSWORD=${DB_PASSWORD}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    restart: always
+
+  # MongoDB for conversation storage
+  mongo:
+    image: mongo:5
+    ports:
+      - "27017:27017"
+    volumes:
+      - mongo_data:/data/db
+    restart: always
+
+  # Redis for caching
+  redis:
+    image: redis:6
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    restart: always
+
+  # RabbitMQ for message queue
+  rabbitmq:
+    image: rabbitmq:3-management
+    ports:
+      - "5672:5672"
+      - "15672:15672"
+    volumes:
+      - rabbitmq_data:/var/lib/rabbitmq
+    restart: always
+
+volumes:
+  postgres_data:
+  mongo_data:
+  redis_data:
+  rabbitmq_data:
+Backend Dockerfile
+# backend/Dockerfile
+FROM python:3.10-slim
+
+WORKDIR /app
+
+# Install system dependencies
+RUN apt-get update && apt-get install -y \
+    build-essential \
+    libpq-dev \
+    && apt-get clean \
+    && rm -rf /var/lib/apt/lists/*
+
+# Install Python dependencies
+COPY requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt
+
+# Copy application code
+COPY . .
+
+# Expose API port
+EXPOSE 8000
+
+# Run the application
+CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000"]
+Frontend Dockerfile
+# frontend/Dockerfile
+# Build stage
+FROM node:16-alpine as build
+
+WORKDIR /app
+
+COPY package*.json ./
+RUN npm ci
+
+COPY . .
+RUN npm run build
+
+# Production stage
+FROM nginx:alpine
+
+COPY --from=build /app/build /usr/share/nginx/html
+COPY nginx.conf /etc/nginx/conf.d/default.conf
+
+EXPOSE 80
+
+CMD ["nginx", "-g", "daemon off;"]
+
+
+Nginx Configuration
+# frontend/nginx.conf
+server {
+    listen 80;
+    server_name localhost;
+    root /usr/share/nginx/html;
+    index index.html;
+
+    # Gzip compression
+    gzip on;
+    gzip_comp_level 5;
+    gzip_min_length 256;
+    gzip_proxied any;
+    gzip_vary on;
+    gzip_types
+        application/javascript
+        application/json
+        application/x-javascript
+        text/css
+        text/javascript
+        text/plain;
+
+    location / {
+        try_files $uri $uri/ /index.html;
+    }
+
+    location /api/ {
+        proxy_pass http://api:8000/;
+        proxy_http_version 1.1;
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection 'upgrade';
+        proxy_set_header Host $host;
+        proxy_cache_bypass $http_upgrade;
+    }
+}
+
+CI/CD Pipeline
+The system will use GitHub Actions for continuous integration and deployment.
+GitHub Actions Workflow
+# .github/workflows/main.yml
+name: CI/CD Pipeline
+
+on:
+  push:
+    branches: [main, develop]
+  pull_request:
+    branches: [main, develop]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+      
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.10'
+          
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r backend/requirements.txt
+          pip install pytest pytest-cov
+          
+      - name: Run tests
+        run: |
+          cd backend
+          python -m pytest --cov=. --cov-report=xml
+          
+      - name: Upload coverage to Codecov
+        uses: codecov/codecov-action@v3
+        with:
+          file: ./backend/coverage.xml
+          fail_ci_if_error: true
+  
+  build:
+    needs: test
+    runs-on: ubuntu-latest
+    if: github.event_name == 'push'
+    steps:
+      - uses: actions/checkout@v3
+      
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v2
+      
+      - name: Login to DockerHub
+        uses: docker/login-action@v2
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+      
+      - name: Build and push API
+        uses: docker/build-push-action@v4
+        with:
+          context: ./backend
+          push: true
+          tags: openmanus/api:latest
+      
+      - name: Build and push Frontend
+        uses: docker/build-push-action@v4
+        with:
+          context: ./frontend
+          push: true
+          tags: openmanus/frontend:latest
+  
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+    steps:
+      - name: Install SSH key
+        uses: shimataro/ssh-key-action@v2
+        with:
+          key: ${{ secrets.SSH_PRIVATE_KEY }}
+          known_hosts: ${{ secrets.KNOWN_HOSTS }}
+      
+      - name: Deploy to production
+        run: |
+          ssh ${{ secrets.SSH_USER }}@${{ secrets.SSH_HOST }} << 'EOF'
+            cd /opt/openmanus
+            docker-compose pull
+            docker-compose down
+            docker-compose up -d
+          EOF
+
+Security Implementation
+
+JWT Authentication
+# backend/auth/jwt.py
+from datetime import datetime, timedelta
+from typing import Optional
+
+from fastapi import Depends, HTTPException, status
+from fastapi.security import OAuth2PasswordBearer
+from jose import JWTError, jwt
+from passlib.context import CryptContext
+from pydantic import BaseModel
+
+# Configuration
+SECRET_KEY = "your-secret-key"  # In production, load from environment
+ALGORITHM = "HS256"
+ACCESS_TOKEN_EXPIRE_MINUTES = 30
+
+# Models
+class Token(BaseModel):
+    access_token: str
+    token_type: str
+
+class TokenData(BaseModel):
+    username: Optional[str] = None
+
+class User(BaseModel):
+    username: str
+    email: Optional[str] = None
+    full_name: Optional[str] = None
+    disabled: Optional[bool] = False
+
+# Password hashing
+pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
+oauth2_scheme = OAuth2PasswordBearer(tokenUrl="token")
+
+# Helper functions
+def verify_password(plain_password, hashed_password):
+    return pwd_context.verify(plain_password, hashed_password)
+
+def get_password_hash(password):
+    return pwd_context.hash(password)
+
+def create_access_token(data: dict, expires_delta: Optional[timedelta] = None):
+    to_encode = data.copy()
+    if expires_delta:
+        expire = datetime.utcnow() + expires_delta
+    else:
+        expire = datetime.utcnow() + timedelta(minutes=15)
+    to_encode.update({"exp": expire})
+    encoded_jwt = jwt.encode(to_encode, SECRET_KEY, algorithm=ALGORITHM)
+    return encoded_jwt
+
+async def get_current_user(token: str = Depends(oauth2_scheme)):
+    credentials_exception = HTTPException(
+        status_code=status.HTTP_401_UNAUTHORIZED,
+        detail="Could not validate credentials",
+        headers={"WWW-Authenticate": "Bearer"},
+    )
+    try:
+        payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
+        username: str = payload.get("sub")
+        if username is None:
+            raise credentials_exception
+        token_data = TokenData(username=username)
+    except JWTError:
+        raise credentials_exception
+    
+    # In a real application, you would look up the user in your database
+    # For this example, we'll use a dummy user
+    user = User(
+        username=token_data.username,
+        email="user@example.com",
+        full_name="Demo User"
+    )
+    
+    if user is None:
+        raise credentials_exception
+    return user
+
+async def get_current_active_user(current_user: User = Depends(get_current_user)):
+    if current_user.disabled:
+        raise HTTPException(status_code=400, detail="Inactive user")
+    return current_user
+
+Input Validation and Sanitization
+All API input will be validated using Pydantic models:
+# backend/models/service_request.py
+from datetime import datetime
+from enum import Enum
+from typing import Optional
+from pydantic import BaseModel, Field, validator
+
+class PriorityEnum(str, Enum):
+    low = "low"
+    medium = "medium"
+    high = "high"
+    urgent = "urgent"
+
+class StatusEnum(str, Enum):
+    pending = "pending"
+    scheduled = "scheduled"
+    in_progress = "in_progress"
+    completed = "completed"
+    cancelled = "cancelled"
+
+class ServiceRequestCreate(BaseModel):
+    customer_id: int
+    appliance_type: str
+    appliance_brand: str
+    appliance_model: Optional[str] = None
+    issue_description: str
+    priority: PriorityEnum = PriorityEnum.medium
+    preferred_date: Optional[str] = None
+    preferred_time: Optional[str] = None
+    notes: Optional[str] = None
+    status: StatusEnum = StatusEnum.pending
+    
+    @validator('issue_description')
+    def description_not_empty(cls, v):
+        if not v.strip():
+            raise ValueError('Issue description cannot be empty')
+        return v
+    
+    @validator('preferred_date')
+    def validate_date_format(cls, v):
+        if v:
+            try:
+                datetime.strptime(v, '%Y-%m-%d')
+            except ValueError:
+                raise ValueError('Date must be in YYYY-MM-DD format')
+        return v
+
+class ServiceRequest(ServiceRequestCreate):
+    id: int
+    created_at: datetime
+    updated_at: datetime
+    
+    class Config:
+        orm_mode = True
+Testing Strategy
+Unit Tests
+# backend/tests/test_agents.py
+import pytest
+from unittest.mock import AsyncMock, patch
+from agent_system.core import AgentSystem
+from agent_system.agents.executive import ExecutiveAgent
+
+@pytest.fixture
+def agent_system():
+    with patch('agent_system.core.AgentSystem._load_config') as mock_load_config:
+        mock_load_config.return_value = {
+            'llm': {
+                'executive_agent': 'claude-3-7-sonnet',
+                'manager_agents': 'gpt-4o',
+                'task_agents': 'gpt-4o-mini'
+            }
+        }
+        return AgentSystem('mock_config.yaml')
+
+@pytest.mark.asyncio
+async def test_process_request(agent_system):
+    # Mock the executive agent's process method
+    agent_system.executive_agent.process = AsyncMock()
+    agent_system.executive_agent.process.return_value = {
+        'status': 'success',
+        'response': 'Test response'
+    }
+    
+    # Create a test request
+    request = {
+        'id': 'test123',
+        'type': 'test',
+        'content': 'Test request',
+        'context': {}
+    }
+    
+    # Process the request
+    result = await agent_system.process_request(request)
+    
+    # Assert the executive agent's process method was called
+    agent_system.executive_agent.process.assert_called_once_with(request)
+    
+    # Assert the result matches the expected output
+    assert result['status'] == 'success'
+    assert result['response'] == 'Test response'
+
+@pytest.mark.asyncio
+async def test_executive_agent_process():
+    # Create a mock LLM service
+    mock_llm_service = AsyncMock()
+    mock_llm_service.generate.return_value = {
+        'content': '{"domain": "customer_service", "plan": {"steps": [{"agent": "customer_relations", "action": "analyze_request"}]}}'
+    }
+    
+    # Create an executive agent with the mock LLM service
+    executive_agent = ExecutiveAgent('claude-3-7-sonnet', llm_service=mock_llm_service)
+    
+    # Create a test request
+    request = {
+        'id': 'test123',
+        'type': 'test',
+        'content': 'I need help with my refrigerator',
+        'context': {}
+    }
+    
+    # Process the request
+    result = await executive_agent.process(request)
+    
+    # Assert the LLM service was called
+    mock_llm_service.generate.assert_called_once()
+    
+    # Assert the result contains the expected fields
+    assert 'domain' in result
+    assert result['domain'] == 'customer_service'
+    assert 'plan' in result
+    assert 'steps' in result['plan']
+
+Integration Tests
+# backend/tests/integration/test_api.py
+import pytest
+from fastapi.testclient import TestClient
+from main import app
+from unittest.mock import patch
+
+client = TestClient(app)
+
+def test_health_check():
+    response = client.get("/health")
+    assert response.status_code == 200
+    assert response.json() == {"status": "healthy"}
+
+@pytest.mark.integration
+def test_login():
+    response = client.post(
+        "/token",
+        data={"username": "demo", "password": "demo1234"},
+    )
+    assert response.status_code == 200
+    assert "access_token" in response.json()
+    assert "token_type" in response.json()
+    assert response.json()["token_type"] == "bearer"
+
+@pytest.mark.integration
+def test_unauthorized_access():
+    response = client.get("/api/customers")
+    assert response.status_code == 401
+
+@pytest.mark.integration
+def test_authorized_access():
+    # First login to get token
+    login_response = client.post(
+        "/token",
+        data={"username": "demo", "password": "demo1234"},
+    )
+    token = login_response.json()["access_token"]
+    
+    # Then access protected endpoint
+    response = client.get(
+        "/api/customers",
+        headers={"Authorization": f"Bearer {token}"}
+    )
+    assert response.status_code == 200
+    assert isinstance(response.json(), list)
+
+@pytest.mark.integration
+@patch('agent_system.core.AgentSystem.process_request')
+async def test_executive_agent_endpoint(mock_process_request):
+    # Mock the agent system process_request method
+    mock_process_request.return_value = {
+        "status": "success",
+        "response": "Test response"
+    }
+    
+    # First login to get token
+    login_response = client.post(
+        "/token",
+        data={"username": "demo", "password": "demo1234"},
+    )
+    token = login_response.json()["access_token"]
+    
+    # Then access the executive agent endpoint
+    response = client.post(
+        "/api/agents/executive",
+        headers={"Authorization": f"Bearer {token}"},
+        json={
+            "type": "test",
+            "content": "Test request"
+        }
+    )
+    assert response.status_code == 200
+    assert response.json()["status"] == "success"
+    assert response.json()["response"] == "Test response"
+    
+Performance Optimization
+-- Create indexes for frequently queried columns
+CREATE INDEX idx_customers_email ON customers(email);
+CREATE INDEX idx_service_requests_customer_id ON service_requests(customer_id);
+CREATE INDEX idx_service_requests_status ON service_requests(status);
+CREATE INDEX idx_appointments_technician_id ON appointments(technician_id);
+CREATE INDEX idx_appointments_date ON appointments(appointment_date);
+CREATE INDEX idx_parts_name ON parts(name);
+CREATE INDEX idx_invoices_customer_id ON invoices(customer_id);
+
+
+Database Indexing
+-- Create indexes for frequently queried columns
+CREATE INDEX idx_customers_email ON customers(email);
+CREATE INDEX idx_service_requests_customer_id ON service_requests(customer_id);
+CREATE INDEX idx_service_requests_status ON service_requests(status);
+CREATE INDEX idx_appointments_technician_id ON appointments(technician_id);
+CREATE INDEX idx_appointments_date ON appointments(appointment_date);
+CREATE INDEX idx_parts_name ON parts(name);
+CREATE INDEX idx_invoices_customer_id ON invoices(customer_id);
+
+Caching Strategy
+# backend/utils/cache.py
+import json
+from functools import wraps
+from typing import Any, Callable
+import redis
+
+# Initialize Redis client
+redis_client = redis.Redis(host='redis', port=6379, db=0)
+
+def cache(ttl: int = 300):
+    """
+    Cache decorator for functions and async functions.
+    
+    Args:
+        ttl: Time to live in seconds. Default is 300 (5 minutes).
+    """
+    def decorator(func: Callable) -> Callable:
+        @wraps(func)
+        async def async_wrapper(*args, **kwargs) -> Any:
+            # Generate a cache key from function name and arguments
+            key = f"{func.__module__}.{func.__name__}:{json.dumps(args)}:{json.dumps(kwargs)}"
+            
+            # Try to get from cache
+            cached = redis_client.get(key)
+            if cached:
+                return json.loads(cached)
+            
+            # If not in cache, call the function
+            result = await func(*args, **kwargs)
+            
+            # Cache the result
+            redis_client.setex(key, ttl, json.dumps(result))
+            
+            return result
+            
+        @wraps(func)
+        def sync_wrapper(*args, **kwargs) -> Any:
+            # Generate a cache key from function name and arguments
+            key = f"{func.__module__}.{func.__name__}:{json.dumps(args)}:{json.dumps(kwargs)}"
+            
+            # Try to get from cache
+            cached = redis_client.get(key)
+            if cached:
+                return json.loads(cached)
+            
+            # If not in cache, call the function
+            result = func(*args, **kwargs)
+            
+            # Cache the result
+            redis_client.setex(key, ttl, json.dumps(result))
+            
+            return result
+        
+        # Return the appropriate wrapper based on whether the function is async
+        if asyncio.iscoroutinefunction(func):
+            return async_wrapper
+        return sync_wrapper
+    
+    return decorator
+
+def invalidate_cache(prefix: str = None):
+    """
+    Invalidate cache entries with the given prefix.
+    
+    Args:
+        prefix: Prefix of cache keys to invalidate.
+    """
+    if prefix:
+        # Get all keys matching the prefix
+        keys = redis_client.keys(f"{prefix}*")
+        if keys:
+            # Delete all matching keys
+            redis_client.delete(*keys)
+    else:
+        # If no prefix is provided, clear the entire cache
+        redis_client.flushdb()
+
+
+Monitoring and Logging
+# backend/utils/logging.py
+import logging
+import json
+import time
+from datetime import datetime
+from fastapi import Request, Response
+from starlette.middleware.base import BaseHTTPMiddleware
+
+# Configure logging
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+    handlers=[
+        logging.StreamHandler(),
+        logging.FileHandler('logs/app.log')
+    ]
+)
+
+logger = logging.getLogger('openmanus')
+
+class RequestLoggingMiddleware(BaseHTTPMiddleware):
+    async def dispatch(self, request: Request, call_next):
+        start_time = time.time()
+        
+        # Generate request ID
+        request_id = f"{int(time.time())}-{id(request)}"
+        
+        # Log request details
+        await self._log_request(request, request_id)
+        
+        try:
+            # Process the request
+            response = await call_next(request)
+            
+            # Log response details
+            process_time = time.time() - start_time
+            self._log_response(response, process_time, request_id)
+            
+            return response
+        except Exception as e:
+            # Log exceptions
+            process_time = time.time() - start_time
+            logger.error(
+                f"Request failed: {request_id} - {str(e)}",
+                extra={
+                    'request_id': request_id,
+                    'process_time': process_time,
+                    'error': str(e)
+                }
+            )
+            raise
+    
+    async def _log_request(self, request: Request, request_id: str):
+        body = None
+        if request.method in ['POST', 'PUT', 'PATCH']:
+            try:
+                body = await request.json()
+                # Redact sensitive information
+                if isinstance(body, dict) and 'password' in body:
+                    body['password'] = '********'
+            except:
+                body = 'Could not parse request body'
+        
+        logger.info(
+            f"Request: {request_id} - {request.method} {request.url.path}",
+            extra={
+                'request_id': request_id,
+                'method': request.method,
+                'path': request.url.path,
+                'query_params': dict(request.query_params),
+                'client_ip': request.client.host,
+                'body': body
+            }
+        )
+    
+    def _log_response(self, response: Response, process_time: float, request_id: str):
+        logger.info(
+            f"Response: {request_id} - Status: {response.status_code} - Time: {process_time:.4f}s",
+            extra={
+                'request_id': request_id,
+                'status_code': response.status_code,
+                'process_time': process_time
+            }
+        )
+
+def log_agent_activity(agent_type: str, agent_name: str, action: str, details: dict = None):
+    """
+    Log agent activity for monitoring and debugging.
+    
+    Args:
+        agent_type: Type of agent (executive, manager, task)
+        agent_name: Name of the agent
+        action: Action being performed
+        details: Additional details about the action
+    """
+    logger.info(
+        f"Agent Activity: {agent_type}:{agent_name} - {action}",
+        extra={
+            'timestamp': datetime.now().isoformat(),
+            'agent_type': agent_type,
+            'agent_name': agent_name,
+            'action': action,
+            'details': details or {}
+        }
+    )
+
+
+Conclusion
+This comprehensive technical implementation guide provides all the necessary components to build the OpenManus Appliance Repair Business Automation System. The system features a hierarchical AI agent architecture with Claude 3.7 Sonnet as the executive agent, GPT-4o for manager agents, and GPT-4o-mini for task agents.
+The implementation includes:
+A robust backend API with FastAPI
+A modern React frontend with Material UI
+Database schemas for PostgreSQL and MongoDB
+Comprehensive API endpoints for all business functions
+Integration with Go High Level CRM
+Docker containerization for easy deployment
+CI/CD pipeline with GitHub Actions
+Security implementation with JWT authentication
+Performance optimization with caching and database indexing
+Comprehensive testing strategy
+Monitoring and logging capabilities
+This system is designed to be scalable, maintainable, and extensible, providing a solid foundation for the appliance repair business to automate its operations and provide excellent service to its customers.

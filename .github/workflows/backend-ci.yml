@@ -1,0 +1,103 @@
+name: Backend CI/CD
+
+on:
+  push:
+    branches: [ main ]
+    paths:
+      - 'backend/**'
+      - '.github/workflows/backend-ci.yml'
+  pull_request:
+    branches: [ main ]
+    paths:
+      - 'backend/**'
+      - '.github/workflows/backend-ci.yml'
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    
+    services:
+      postgres:
+        image: postgres:14
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: test_db
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    
+    steps:
+    - uses: actions/checkout@v3
+    
+    - name: Set up Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.10'
+        cache: 'pip'
+    
+    - name: Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install -r backend/requirements.txt
+        pip install pytest pytest-asyncio pytest-cov
+    
+    - name: Lint with flake8
+      run: |
+        pip install flake8
+        flake8 backend --count --select=E9,F63,F7,F82 --show-source --statistics
+        flake8 backend --count --exit-zero --max-complexity=10 --max-line-length=127 --statistics
+    
+    - name: Test with pytest
+      env:
+        DATABASE_URL: postgresql+asyncpg://postgres:postgres@localhost:5432/test_db
+        SECRET_KEY: testsecretkey
+        ENVIRONMENT: test
+      run: |
+        cd backend
+        pytest --cov=. --cov-report=xml
+    
+    - name: Upload coverage to Codecov
+      uses: codecov/codecov-action@v3
+      with:
+        file: ./backend/coverage.xml
+        fail_ci_if_error: false
+
+  deploy:
+    needs: test
+    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+    runs-on: ubuntu-latest
+    
+    steps:
+    - uses: actions/checkout@v3
+    
+    - name: Set up Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.10'
+    
+    - name: Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install -r backend/requirements.txt
+    
+    - name: Build and package application
+      run: |
+        cd backend
+        # Add commands to build and package your application
+        # For example:
+        # python -m build
+    
+    - name: Deploy to production
+      # This is a placeholder for your deployment step
+      # Replace with your actual deployment logic
+      run: |
+        echo "Deploying to production..."
+        # Example:
+        # - Deploy to a cloud provider
+        # - Update a container registry
+        # - Trigger a deployment pipeline 

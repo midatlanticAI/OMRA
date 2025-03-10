@@ -1,0 +1,7 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: openmanus-production
+  labels:
+    name: openmanus-production
+    environment: production 

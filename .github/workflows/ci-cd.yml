@@ -1,0 +1,303 @@
+name: OpenManus CI/CD Pipeline
+
+on:
+  push:
+    branches: [ main, dev ]
+  pull_request:
+    branches: [ main, dev ]
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: 'Deployment environment'
+        required: true
+        default: 'staging'
+        type: choice
+        options:
+          - staging
+          - production
+
+jobs:
+  backend-tests:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:14
+        env:
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_USER: postgres
+          POSTGRES_DB: openmanus_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+      
+      mongodb:
+        image: mongo:6
+        ports:
+          - 27017:27017
+
+    steps:
+    - uses: actions/checkout@v3
+    
+    - name: Set up Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.10'
+        cache: 'pip'
+    
+    - name: Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install -r backend/requirements.txt
+        pip install pytest pytest-cov
+    
+    - name: Run backend tests
+      env:
+        DATABASE_URL: postgresql://postgres:postgres@localhost:5432/openmanus_test
+        MONGODB_URI: mongodb://localhost:27017/openmanus_test
+        JWT_SECRET: test_secret_key
+      run: |
+        cd backend
+        pytest --cov=. --cov-report=xml
+    
+    - name: Upload backend coverage to Codecov
+      uses: codecov/codecov-action@v3
+      with:
+        file: ./backend/coverage.xml
+        flags: backend
+
+  frontend-tests:
+    runs-on: ubuntu-latest
+    
+    steps:
+    - uses: actions/checkout@v3
+    
+    - name: Set up Node.js
+      uses: actions/setup-node@v3
+      with:
+        node-version: '18'
+        cache: 'npm'
+        cache-dependency-path: 'frontend/package-lock.json'
+    
+    - name: Install dependencies
+      run: |
+        cd frontend
+        npm ci
+    
+    - name: Lint frontend code
+      run: |
+        cd frontend
+        npm run lint
+    
+    - name: Run frontend tests
+      run: |
+        cd frontend
+        npm test -- --coverage
+    
+    - name: Upload frontend coverage to Codecov
+      uses: codecov/codecov-action@v3
+      with:
+        file: ./frontend/coverage/coverage-final.json
+        flags: frontend
+
+  security-scan:
+    runs-on: ubuntu-latest
+    needs: [backend-tests, frontend-tests]
+    
+    steps:
+    - uses: actions/checkout@v3
+    
+    - name: Run OWASP ZAP Baseline Scan
+      uses: zaproxy/action-baseline@v0.7.0
+      with:
+        target: 'https://example.com'  # Replace with your actual staging URL
+        fail_action: false
+    
+    - name: Run npm audit
+      run: |
+        cd frontend
+        npm audit --audit-level=high
+    
+    - name: Run Python safety check
+      run: |
+        pip install safety
+        safety check -r backend/requirements.txt
+        
+    - name: Run Container Security Scan
+      uses: aquasecurity/trivy-action@master
+      with:
+        scan-type: 'fs'
+        severity: 'CRITICAL,HIGH'
+        format: 'sarif'
+        output: 'trivy-results.sarif'
+
+  build-images:
+    runs-on: ubuntu-latest
+    needs: [backend-tests, frontend-tests, security-scan]
+    if: success() && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/dev' || github.event_name == 'workflow_dispatch')
+    outputs:
+      backend_image: ${{ steps.tag.outputs.backend_tag }}
+      frontend_image: ${{ steps.tag.outputs.frontend_tag }}
+    
+    steps:
+    - uses: actions/checkout@v3
+    
+    - name: Generate image tags
+      id: tag
+      run: |
+        SHORT_SHA=$(echo ${{ github.sha }} | cut -c1-7)
+        echo "backend_tag=openmanus/backend:${SHORT_SHA}" >> $GITHUB_OUTPUT
+        echo "frontend_tag=openmanus/frontend:${SHORT_SHA}" >> $GITHUB_OUTPUT
+    
+    - name: Set up Docker Buildx
+      uses: docker/setup-buildx-action@v2
+    
+    - name: Login to Docker Hub
+      uses: docker/login-action@v2
+      with:
+        username: ${{ secrets.DOCKERHUB_USERNAME }}
+        password: ${{ secrets.DOCKERHUB_TOKEN }}
+    
+    - name: Build and push backend
+      uses: docker/build-push-action@v4
+      with:
+        context: .
+        file: ./Dockerfile.backend
+        push: true
+        tags: |
+          openmanus/backend:latest
+          ${{ steps.tag.outputs.backend_tag }}
+        cache-from: type=registry,ref=openmanus/backend:latest
+        cache-to: type=inline
+    
+    - name: Build and push frontend
+      uses: docker/build-push-action@v4
+      with:
+        context: .
+        file: ./Dockerfile.frontend
+        push: true
+        tags: |
+          openmanus/frontend:latest
+          ${{ steps.tag.outputs.frontend_tag }}
+        cache-from: type=registry,ref=openmanus/frontend:latest
+        cache-to: type=inline
+
+  deploy-staging:
+    runs-on: ubuntu-latest
+    needs: [build-images]
+    if: |
+      success() && 
+      (github.ref == 'refs/heads/dev' || 
+      (github.event_name == 'workflow_dispatch' && github.event.inputs.environment == 'staging'))
+    environment: staging
+    
+    steps:
+    - uses: actions/checkout@v3
+    
+    - name: Install kubectl
+      uses: azure/setup-kubectl@v3
+      
+    - name: Setup kubeconfig
+      run: |
+        mkdir -p $HOME/.kube
+        echo "${{ secrets.KUBE_CONFIG_STAGING }}" > $HOME/.kube/config
+        chmod 600 $HOME/.kube/config
+        
+    - name: Deploy to Kubernetes staging
+      run: |
+        # Update deployment manifests with the image tags
+        sed -i "s|openmanus/backend:latest|${{ needs.build-images.outputs.backend_image }}|g" k8s/staging/backend-deployment.yaml
+        sed -i "s|openmanus/frontend:latest|${{ needs.build-images.outputs.frontend_image }}|g" k8s/staging/frontend-deployment.yaml
+        
+        # Apply configurations
+        kubectl apply -f k8s/staging/namespace.yaml
+        kubectl apply -f k8s/staging/configmap.yaml
+        kubectl apply -f k8s/staging/secret.yaml
+        kubectl apply -f k8s/staging/backend-deployment.yaml
+        kubectl apply -f k8s/staging/frontend-deployment.yaml
+        kubectl apply -f k8s/staging/service.yaml
+        kubectl apply -f k8s/staging/ingress.yaml
+        
+    - name: Verify deployment
+      run: |
+        kubectl rollout status deployment/openmanus-backend -n openmanus-staging
+        kubectl rollout status deployment/openmanus-frontend -n openmanus-staging
+        
+    - name: Configure monitoring
+      run: |
+        kubectl apply -f k8s/monitoring/prometheus-config.yaml
+        
+    - name: Setup database backup
+      run: |
+        kubectl apply -f k8s/backup/backup-cronjob.yaml
+
+  deploy-production:
+    runs-on: ubuntu-latest
+    needs: [build-images]
+    if: |
+      success() && 
+      (github.ref == 'refs/heads/main' || 
+      (github.event_name == 'workflow_dispatch' && github.event.inputs.environment == 'production'))
+    environment: production
+    
+    steps:
+    - uses: actions/checkout@v3
+    
+    - name: Install kubectl
+      uses: azure/setup-kubectl@v3
+      
+    - name: Setup kubeconfig
+      run: |
+        mkdir -p $HOME/.kube
+        echo "${{ secrets.KUBE_CONFIG_PRODUCTION }}" > $HOME/.kube/config
+        chmod 600 $HOME/.kube/config
+        
+    - name: Deploy to Kubernetes production
+      run: |
+        # Update deployment manifests with the image tags
+        sed -i "s|openmanus/backend:latest|${{ needs.build-images.outputs.backend_image }}|g" k8s/production/backend-deployment.yaml
+        sed -i "s|openmanus/frontend:latest|${{ needs.build-images.outputs.frontend_image }}|g" k8s/production/frontend-deployment.yaml
+        
+        # Apply configurations
+        kubectl apply -f k8s/production/namespace.yaml
+        kubectl apply -f k8s/production/configmap.yaml
+        kubectl apply -f k8s/production/secret.yaml
+        kubectl apply -f k8s/production/backend-deployment.yaml
+        kubectl apply -f k8s/production/frontend-deployment.yaml
+        kubectl apply -f k8s/production/service.yaml
+        kubectl apply -f k8s/production/ingress.yaml
+        
+    - name: Verify deployment
+      run: |
+        kubectl rollout status deployment/openmanus-backend -n openmanus-production
+        kubectl rollout status deployment/openmanus-frontend -n openmanus-production
+        
+    - name: Configure monitoring
+      run: |
+        kubectl apply -f k8s/monitoring/prometheus-config.yaml
+        
+    - name: Setup database backup
+      run: |
+        kubectl apply -f k8s/backup/backup-cronjob.yaml
+        
+  notify:
+    runs-on: ubuntu-latest
+    needs: [deploy-staging, deploy-production]
+    if: always()
+    
+    steps:
+    - name: Send deployment notification
+      uses: rtCamp/action-slack-notify@v2
+      env:
+        SLACK_WEBHOOK: ${{ secrets.SLACK_WEBHOOK }}
+        SLACK_CHANNEL: deployments
+        SLACK_COLOR: ${{ job.status }}
+        SLACK_TITLE: OpenManus Deployment Status
+        SLACK_MESSAGE: |
+          Repository: ${{ github.repository }}
+          Workflow: ${{ github.workflow }}
+          Status: ${{ job.status }}
+          See details: https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }} 

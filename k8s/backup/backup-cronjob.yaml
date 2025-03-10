@@ -1,0 +1,128 @@
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: openmanus-db-backup
+  namespace: openmanus-production
+spec:
+  schedule: "0 1 * * *"  # Run at 1 AM daily
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 1
+  concurrencyPolicy: Forbid
+  jobTemplate:
+    spec:
+      template:
+        spec:
+          containers:
+          - name: db-backup
+            image: postgres:14
+            command:
+            - /bin/bash
+            - -c
+            - |
+              # Get current date for backup file name
+              BACKUP_DATE=$(date +%Y%m%d-%H%M%S)
+              
+              # Create a PostgreSQL dump
+              pg_dump -h ${PG_HOST} -p ${PG_PORT} -U ${PG_USER} -d ${PG_DATABASE} -F c -f /backup/openmanus-${BACKUP_DATE}.dump
+              
+              # Compress the backup
+              gzip /backup/openmanus-${BACKUP_DATE}.dump
+              
+              # Copy to S3/cloud storage
+              if [ -n "${AWS_ACCESS_KEY_ID}" ]; then
+                aws s3 cp /backup/openmanus-${BACKUP_DATE}.dump.gz s3://${BACKUP_BUCKET}/postgres/openmanus-${BACKUP_DATE}.dump.gz
+                
+                # Cleanup old backups - keep last 7 days
+                aws s3 ls s3://${BACKUP_BUCKET}/postgres/ | grep openmanus | sort | head -n -7 | awk '{print $4}' | xargs -I {} aws s3 rm s3://${BACKUP_BUCKET}/postgres/{}
+              fi
+              
+              # Also backup MongoDB
+              mongodump --host=${MONGO_HOST} --port=${MONGO_PORT} --username=${MONGO_USER} --password=${MONGO_PASSWORD} --authenticationDatabase=admin --db=${MONGO_DATABASE} --out=/backup/mongo-${BACKUP_DATE}
+              
+              # Compress MongoDB backup
+              tar -zcvf /backup/mongo-${BACKUP_DATE}.tar.gz -C /backup mongo-${BACKUP_DATE}
+              
+              # Copy MongoDB backup to S3/cloud storage
+              if [ -n "${AWS_ACCESS_KEY_ID}" ]; then
+                aws s3 cp /backup/mongo-${BACKUP_DATE}.tar.gz s3://${BACKUP_BUCKET}/mongodb/mongo-${BACKUP_DATE}.tar.gz
+                
+                # Cleanup old MongoDB backups - keep last 7 days
+                aws s3 ls s3://${BACKUP_BUCKET}/mongodb/ | grep mongo | sort | head -n -7 | awk '{print $4}' | xargs -I {} aws s3 rm s3://${BACKUP_BUCKET}/mongodb/{}
+              fi
+            env:
+            - name: PG_HOST
+              valueFrom:
+                secretKeyRef:
+                  name: backup-secrets
+                  key: pg_host
+            - name: PG_PORT
+              valueFrom:
+                secretKeyRef:
+                  name: backup-secrets
+                  key: pg_port
+            - name: PG_USER
+              valueFrom:
+                secretKeyRef:
+                  name: backup-secrets
+                  key: pg_user
+            - name: PG_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: backup-secrets
+                  key: pg_password
+            - name: PG_DATABASE
+              valueFrom:
+                secretKeyRef:
+                  name: backup-secrets
+                  key: pg_database
+            - name: MONGO_HOST
+              valueFrom:
+                secretKeyRef:
+                  name: backup-secrets
+                  key: mongo_host
+            - name: MONGO_PORT
+              valueFrom:
+                secretKeyRef:
+                  name: backup-secrets
+                  key: mongo_port
+            - name: MONGO_USER
+              valueFrom:
+                secretKeyRef:
+                  name: backup-secrets
+                  key: mongo_user
+            - name: MONGO_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: backup-secrets
+                  key: mongo_password
+            - name: MONGO_DATABASE
+              valueFrom:
+                secretKeyRef:
+                  name: backup-secrets
+                  key: mongo_database
+            - name: AWS_ACCESS_KEY_ID
+              valueFrom:
+                secretKeyRef:
+                  name: backup-secrets
+                  key: aws_access_key_id
+                  optional: true
+            - name: AWS_SECRET_ACCESS_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: backup-secrets
+                  key: aws_secret_access_key
+                  optional: true
+            - name: BACKUP_BUCKET
+              valueFrom:
+                secretKeyRef:
+                  name: backup-secrets
+                  key: backup_bucket
+                  optional: true
+            volumeMounts:
+            - name: backup-volume
+              mountPath: /backup
+          volumes:
+          - name: backup-volume
+            persistentVolumeClaim:
+              claimName: openmanus-backup-pvc
+          restartPolicy: OnFailure 

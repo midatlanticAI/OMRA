@@ -1,0 +1,37 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: openmanus-backend
+  namespace: openmanus-production
+  labels:
+    app: openmanus
+    component: backend
+spec:
+  selector:
+    app: openmanus
+    component: backend
+  ports:
+  - port: 8000
+    targetPort: 8000
+    protocol: TCP
+    name: http
+  type: ClusterIP
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: openmanus-frontend
+  namespace: openmanus-production
+  labels:
+    app: openmanus
+    component: frontend
+spec:
+  selector:
+    app: openmanus
+    component: frontend
+  ports:
+  - port: 80
+    targetPort: 80
+    protocol: TCP
+    name: http
+  type: ClusterIP 
