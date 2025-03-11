@@ -1,0 +1,910 @@
+Intro to function calling with the Gemini API
+
+Using the Gemini API function calling feature, you can provide custom function definitions to the model. The model doesn't directly invoke these functions, but instead generates structured output that specifies a function name and suggested arguments. You can then use the function name and arguments to call an external API, and you can incorporate the resulting API output into a further query to the model, enabling the model to provide a more comprehensive response and take additional actions.
+
+Function calling empowers users to interact with real-time information and services like databases, customer relationship management systems, and document repositories. The feature also enhances the model's ability to provide relevant and contextual answers. Function calling is best for interacting with external systems. If your use case requires the model to perform computation but doesn't involve external systems or APIs, you should consider using code execution instead.
+
+For a working example of function calling, see the "light bot" notebook.
+
+Beta: The function calling feature is in Beta release. For more information, see the API versions page.
+How function calling works
+You use the function calling feature by adding structured query data describing programing interfaces, called function declarations, to a model prompt. The function declarations provide the name of the API function, explain its purpose, any parameters it supports, and descriptions of those parameters. After you pass a list of function declarations in a query to the model, it analyzes function declarations and the rest of the query to determine how to use the declared API in response to the request.
+
+The model then returns an object in an OpenAPI compatible schema specifying how to call one or more of the declared functions in order to respond to the user's question. You can then take the recommended function call parameters, call the actual API, get a response, and provide that response to the user or take further action. Note that the model doesn't actually call the declared functions. Instead, you use the returned schema object parameters to call the function. The Gemini API also supports parallel function calling, where the model recommends multiple API function calls based on a single request.
+
+Function declarations
+When you implement function calling in a prompt, you create a tools object, which contains one or more function declarations. You define functions using JSON, specifically with a select subset of the OpenAPI schema format. A single function declaration can include the following parameters:
+
+name (string): The unique identifier for the function within the API call.
+description (string): A comprehensive explanation of the function's purpose and capabilities.
+parameters (object): Defines the input data required by the function.
+type (string): Specifies the overall data type, such as object.
+properties (object): Lists individual parameters, each with:
+type (string): The data type of the parameter, such as string, integer, boolean.
+description (string): A clear explanation of the parameter's purpose and expected format.
+required (array): An array of strings listing the parameter names that are mandatory for the function to operate.
+For code examples of a function declaration using cURL commands, see the Function calling examples. For examples of creating function declarations using the Gemini API SDKs, see the Function calling tutorial.
+
+Best practices for function declarations
+Accurately defining your functions is essential when integrating them into your requests. Each function relies on specific parameters that guide its behavior and interaction with the model. The following listing provides guidance on defining the parameters of an individual function in a functions_declarations array.
+
+name: Use clear, descriptive names without space, period (.), or dash (-) characters. Instead, use underscore (_) characters or camel case.
+
+description: Provide detailed, clear, and specific function descriptions, providing examples if necessary. For example, instead of find theaters, use find theaters based on location and optionally movie title that is currently playing in theaters. Avoid overly broad or ambiguous descriptions.
+
+properties > type: Use strongly typed parameters to reduce model hallucinations. For example, if the parameter values are from a finite set, use an enum field instead of listing the values in the description (e.g., "type": "enum", "values": ["now_playing", "upcoming"]). If the parameter value is always an integer, set the type to integer rather than number.
+
+properties > description: Provide concrete examples and constraints. For example, instead of the location to search, use The city and state, e.g. San Francisco, CA or a zip code e.g. 95616.
+
+For more best practices when using function calling, see the Best Practices section.
+
+Function calling mode
+You can use the function calling mode parameter to modify the execution behavior of the feature. There are three modes available:
+
+AUTO: The default model behavior. The model decides to predict either a function call or a natural language response.
+ANY: The model is constrained to always predict a function call. If allowed_function_names is not provided, the model picks from all of the available function declarations. If allowed_function_names is provided, the model picks from the set of allowed functions.
+NONE: The model won't predict a function call. In this case, the model behavior is the same as if you don't pass any function declarations.
+You can also pass a set of allowed_function_names that, when provided, limits the functions that the model will call. You should only include allowed_function_names when the mode is ANY. Function names should match function declaration names. With the mode set to ANY and the allowed_function_names set, the model will predict a function call from the set of function names provided.
+
+Key Point: If you set the mode to ANY and provide allowed_function_names, the model picks from the set of allowed functions. If you set the mode to ANY and don't provide allowed_function_names, the model picks from all of the available functions.
+The following code snippet from an example request shows how to set the mode to ANY and specify a list of allowed functions:
+
+
+"tool_config": {
+  "function_calling_config": {
+    "mode": "ANY",
+    "allowed_function_names": ["find_theaters", "get_showtimes"]
+  },
+}
+Compositional function calling
+Gemini 2.0 supports a new function calling capability: compositional function calling. Compositional function calling enables the Gemini API to invoke multiple user-defined functions automatically in the process of generating a response. For example, to respond to the prompt "Get the temperature in my current location", the Gemini API might invoke both a get_current_location() function and a get_weather() function that takes the location as a parameter.
+
+Compositional function calling with code execution requires bidirectional streaming and is only supported by the new Multimodal Live API. Here's an example showing how you might use compositional function calling, code execution, and the Multimodal Live API together:
+
+Note: The run() function declaration, which handles the asynchronous websocket setup, is omitted for brevity.
+
+turn_on_the_lights_schema = {'name': 'turn_on_the_lights'}
+turn_off_the_lights_schema = {'name': 'turn_off_the_lights'}
+
+prompt = """
+  Hey, can you write run some python code to turn on the lights, wait 10s and then turn off the lights?
+  """
+
+tools = [
+    {'code_execution': {}},
+    {'function_declarations': [turn_on_the_lights_schema, turn_off_the_lights_schema]}
+]
+
+await run(prompt, tools=tools, modality="AUDIO")
+Python developers can try this out in the Live API Tool Use notebook.
+
+Multi-tool use
+Note: Multi-tool use is only supported by the Multimodal Live API.
+With Gemini 2.0, you can enable multiple tools at the same time, and the model will decide when to call them. Here's an example that enables two tools, Grounding with Google Search and code execution, in a request using the Multimodal Live API.
+
+Note: The run() function declaration, which handles the asynchronous websocket setup, is omitted for brevity. Additionally, multi-tool use is now supported only through the Multimodal Live API.
+
+prompt = """
+  Hey, I need you to do three things for me.
+
+  1. Turn on the lights.
+  2. Then compute the largest prime palindrome under 100000.
+  3. Then use Google Search to look up information about the largest earthquake in California the week of Dec 5 2024.
+
+  Thanks!
+  """
+
+tools = [
+    {'google_search': {}},
+    {'code_execution': {}},
+    {'function_declarations': [turn_on_the_lights_schema, turn_off_the_lights_schema]}
+]
+
+await run(prompt, tools=tools, modality="AUDIO")
+Python developers can try this out in the Live API Tool Use notebook.
+
+Function calling examples
+This section provides example prompts for function calling using cURL commands. The examples include single turn and multiple-turn scenarios, and enabling different function calling modes.
+
+When using cURL commands with this feature, the function and parameter information is included in the tools element. Each function declaration in the tools element contains the function name, and you specify the parameters using an OpenAPI compatible schema, and a function description.
+
+Single-turn example
+Single-turn is when you call the language model one time. With function calling, a single-turn use case might be when you provide the model a natural language query and a list of functions. In this case, the model uses the function declaration, which includes the function name, parameters, and description, to predict which function to call and the arguments to call it with.
+
+The following curl sample is an example of passing in a description of a function that returns information about where a movie is playing. Several function declarations are included in the request, such as find_movies and find_theaters.
+
+Single-turn function calling example request
+The response to this curl example might be similar to the following.
+
+Single-turn function calling curl example response
+Single-turn example using ANY mode
+The following curl example is similar to the single-turn example, but it sets the mode to ANY:
+
+
+"tool_config": {
+  "function_calling_config": {
+    "mode": "ANY"
+  },
+}
+Single-turn function calling using ANY mode (request)
+The response might be similar to the following:
+
+Single-turn function calling using ANY mode (response)
+Single-turn example using ANY mode and allowed functions
+The following curl example is similar to the single-turn example, but it sets the mode to ANY and includes a list of allowed functions:
+
+
+"tool_config": {
+  "function_calling_config": {
+    "mode": "ANY",
+    "allowed_function_names": ["find_theaters", "get_showtimes"]
+  },
+}
+Single-turn function calling using ANY mode and allowed functions (request)
+The model can't predict the find_movies function, because it's not on the list of allowed functions, so it predicts a different function instead. The response might be similar to the following:
+
+Single-turn function calling using ANY mode and allowed functions (response)
+Multi-turn examples
+You can implement a multi-turn function calling scenario by doing the following:
+
+Get a function call response by calling the language model. This is the first turn.
+Call the language model using the function call response from the first turn and the function response you get from calling that function. This is the second turn.
+The response from the second turn either summarizes the results to answer your query in the first turn, or contains a second function call you can use to get more information for your query.
+
+This topic includes two multi-turn curl examples:
+
+Curl example that uses a function response from a previous turn
+Curl example that calls a language model multiple times
+Use a response from a previous turn
+The following curl sample calls the function and arguments returned by the previous single-turn example to get a response. The method and parameters returned by the single-turn example are in this JSON.
+
+
+"functionCall": {
+  "name": "find_theaters",
+  "args": {
+    "movie": "Barbie",
+    "location": "Mountain View, CA"
+  }
+}
+Multi-turn function calling curl example request
+The response to this curl example includes the result of calling the find_theaters method. The response might be similar to the following:
+
+Multi-turn function calling curl example response
+Call the model multiple times
+The following cURL example calls the generative AI model multiple times to call a function. Each time the model calls the function, it can use a different function to answer a different user query in the request.
+
+Multi-turn function calling curl example request
+Multi-turn function calling curl example response
+Best practices
+Follow these best practices to improve the accuracy and reliability of your function calls.
+
+User prompt
+For best results, prepend the user query with the following details:
+
+Additional context for the model. For example, You are a movie API assistant to help users find movies and showtimes based on their preferences.
+Details or instructions on how and when to use the functions. For example, Don't make assumptions on showtimes. Always use a future date for showtimes.
+Instructions to ask clarifying questions if user queries are ambiguous. For example, Ask clarifying questions if not enough information is available to complete the request.
+Sampling parameters
+For the temperature parameter, use 0 or another low value. This instructs the model to generate more confident results and reduces hallucinations.
+
+API invocation
+If the model proposes the invocation of a function that would send an order, update a database, or otherwise have significant consequences, validate the function call with the user before executing it.
+
+Function calling tutorial
+
+Python Node.js Go Dart (Flutter) Android Swift Web REST
+
+Function calling makes it easier for you to get structured data outputs from generative models. You can then use these outputs to call other APIs and return the relevant response data to the model. In other words, function calling helps you connect generative models to external systems so that the generated content includes the most up-to-date and accurate information.
+
+You can provide Gemini models with descriptions of functions. These are functions that you write in the language of your app (that is, they're not Google Cloud Functions). The model may ask you to call a function and send back the result to help the model handle your query.
+
+If you haven't already, check out the Introduction to function calling to learn more. You can also try out this feature in Google Colab or view the example code in the Gemini API Cookbook repository.
+
+Example API for lighting control
+Imagine you have a basic lighting control system with an application programming interface (API) and you want to allow users to control the lights through simple text requests. You can use the Function Calling feature to interpret lighting change requests from users and translate them into API calls to set the lighting values. This hypothetical lighting control system lets you control the brightness of the light and its color temperature, defined as two separate parameters:
+
+Parameter	Type	Required	Description
+brightness	number	yes	Light level from 0 to 100. Zero is off and 100 is full brightness.
+colorTemperature	string	yes	Color temperature of the light fixture which can be daylight, cool or warm.
+For simplicity, this imaginary lighting system only has one light, so the user does not have to specify a room or location. Here is an example JSON request you could send to the lighting control API to change the light level to 50% using the daylight color temperature:
+
+
+{
+  "brightness": "50",
+  "colorTemperature": "daylight"
+}
+This tutorial shows you how to set up a Function Call for the Gemini API to interpret users lighting requests and map them to API settings to control a light's brightness and color temperature values.
+
+Before you begin: Set up your project and API key
+Before calling the Gemini API, you need to set up your project and configure your API key.
+
+ Expand to view how to set up your project and API key
+
+Define an API function
+Create a function that makes an API request. This function should be defined within the code of your application, but could call services or APIs outside of your application. The Gemini API does not call this function directly, so you can control how and when this function is executed through your application code. For demonstration purposes, this tutorial defines a mock API function that just returns the requested lighting values:
+
+
+def set_light_values(brightness: int, color_temp: str) -> dict[str, int | str]:
+    """Set the brightness and color temperature of a room light. (mock API).
+
+    Args:
+        brightness: Light level from 0 to 100. Zero is off and 100 is full brightness
+        color_temp: Color temperature of the light fixture, which can be `daylight`, `cool` or `warm`.
+
+    Returns:
+        A dictionary containing the set brightness and color temperature.
+    """
+    return {
+        "brightness": brightness,
+        "colorTemperature": color_temp
+    }
+When you create a function to be used in a function call by the model, you should include as much detail as possible in the function and parameter descriptions. The generative model uses this information to determine which function to select and how to provide values for the parameters in the function call.
+
+Caution: For any production application, you should validate the data being passed to the API function from the model before executing the function.
+Note: For programming languages other than Python, you must create a separate function declaration for your API. See the other language programming tutorials for more details.
+Declare functions during model initialization
+When you want to use function calling, you define the functions as tools in the GenerateContentConfig, along with other generation-related settings (such as temperature or stop tokens).
+
+
+from google.genai import types
+
+config = types.GenerateContentConfig(tools=[set_light_values])
+This can be also be defined as a Python dictionary.
+
+
+config = {
+    'tools': [set_light_values],
+}
+Generate a function call
+Once you have defined your function declarations, you can prompt the model to use the function. You can generate content directly, or using the chat interface.
+
+
+from google import genai
+
+client = genai.Client()
+
+# Generate directly with generate_content.
+response = client.models.generate_content(
+    model='gemini-2.0-flash',
+    config=config,
+    contents='Turn the lights down to a romantic level'
+)
+print(response.text)
+
+# Use the chat interface.
+chat = client.chats.create(model='gemini-2.0-flash', config=config)
+response = chat.send_message('Turn the lights down to a romantic level')
+print(response.text)
+In the Python SDK, functions are called automatically. If you want to handle each function call, or perform some other logic between calls, you can disable it through the flag in the generation config.
+
+
+from google.genai import types
+
+# Use strong types.
+config = types.GenerateContentConfig(
+    tools=[set_light_values],
+    automatic_function_calling=types.AutomaticFunctionCallingConfig(disable=True)
+)
+
+# Use a dictionary.
+config = {
+    'tools': [set_light_values],
+    'automatic_function_calling': {'disable': True},
+}
+Parallel function calling
+In addition to basic function calling described above, you can also call multiple functions in a single turn. This section shows an example for how you can use parallel function calling.
+
+Define the tools.
+
+
+def power_disco_ball(power: bool) -> bool:
+    """Powers the spinning disco ball."""
+    print(f"Disco ball is {'spinning!' if power else 'stopped.'}")
+    return True
+
+
+def start_music(energetic: bool, loud: bool) -> str:
+    """Play some music matching the specified parameters.
+
+    Args:
+      energetic: Whether the music is energetic or not.
+      loud: Whether the music is loud or not.
+
+    Returns: The name of the song being played.
+    """
+    print(f"Starting music! {energetic=} {loud=}")
+    return "Never gonna give you up."
+
+
+def dim_lights(brightness: float) -> bool:
+    """Dim the lights.
+
+    Args:
+      brightness: The brightness of the lights, 0.0 is off, 1.0 is full.
+    """
+    print(f"Lights are now set to {brightness:.0%}")
+    return True
+Now call the model with an instruction that could use all of the specified tools. This example uses a tool_config. To learn more you can read about configuring function calling.
+
+
+# Set the model up with tools.
+house_fns = [power_disco_ball, start_music, dim_lights]
+
+config = {
+    # Set the available functions.
+    'tools': house_fns,
+    # Disable AFC so you can inspect the results first.
+    'automatic_function_calling': {'disable': True},
+    # Force the model to act (call 'any' function), instead of chatting.
+    'tool_config': {
+        'function_calling_config': {
+            'mode': 'any'
+        }
+    }
+}
+
+# Call the API.
+chat = client.chats.create(model='gemini-2.0-flash', config=config)
+response = chat.send_message('Turn this place into a party!')
+
+# Print out each of the function calls requested from this single call.
+for fn in response.function_calls:
+  args = ", ".join(f"{key}={val}" for key, val in fn.args.items())
+  print(f"{fn.name}({args})")
+
+power_disco_ball(power=True)
+start_music(energetic=True, loud=True)
+dim_lights(brightness=0.3)
+Each of the printed results reflects a single function call that the model has requested. To send the results back, include the responses in the same order as they were requested.
+
+The simplest way to do this is by leaving automatic_function_calling enabled, so that the SDK will handle the function calls and response passing automatically. To learn more about function calling behavior, see Function calling mode.
+
+Note: When using automatic_function_calling with multiple functions, if any of them fail, the SDK will pass the error back to the model where it may be invoked again. This is helpful, for example, if the model has generated an incorrect argument set that can be correct, but may be problematic if your function produces side-effects before an error is raised.
+
+config = {
+    'tools': house_fns,
+}
+
+# Call the API.
+chat = client.chats.create(model='gemini-2.0-flash', config=config)
+response = chat.send_message('Do everything you need to this place into party!')
+
+print(response.text)
+
+Disco ball is spinning!
+Starting music! energetic=True loud=True
+Lights are now set to 50%
+Alright, I've turned on the disco ball, started playing "Never gonna give you up.", and dimmed the lights. Let's get this party started!
+Function calling mode
+You can use the function calling mode parameter to modify the execution behavior of the feature. There are three modes available:
+
+AUTO: The default model behavior. The model decides to predict either a function call or a natural language response.
+ANY: The model is constrained to always predict a function call. If allowed_function_names is not provided, the model picks from all of the available function declarations. If allowed_function_names is provided, the model picks from the set of allowed functions.
+NONE: The model won't predict a function call. In this case, the model behavior is the same as if you don't pass any function declarations.
+You can also pass a set of allowed_function_names that, when provided, limits the functions that the model will call. You should only include allowed_function_names when the mode is ANY. Function names should match function declaration names. With the mode set to ANY and the allowed_function_names set, the model will predict a function call from the set of function names provided.
+
+Key Point: If you set the mode to ANY and provide allowed_function_names, the model picks from the set of allowed functions. If you set the mode to ANY and don't provide allowed_function_names, the model picks from all of the available functions.
+For examples of setting the function calling mode in Python, see the function calling config notebook.
+
+Function call data type mapping
+Automatic schema extraction from Python functions doesn't work in all cases. For example: it doesn't handle cases where you describe the fields of a nested dictionary-object, but the API does support this. The API is able to describe any of the following types:
+
+
+AllowedType = (int | float | bool | str | list['AllowedType'] | dict[str, AllowedType])
+Important: The SDK converts function parameter type annotations to a format the API understands (genai.types.FunctionDeclaration). The API only supports a limited selection of parameter types, and the Python SDK's automatic conversion only supports a subset of that: AllowedTypes = int | float | bool | str | list['AllowedTypes'] | dict
+To see what the inferred schema looks like, you can convert it using from_callable:
+
+
+from pprint import pprint
+
+def multiply(a: float, b: float):
+    """Returns a * b."""
+    return a * b
+
+fn_decl = types.FunctionDeclaration.from_callable(callable=multiply, client=client)
+
+# to_json_dict() provides a clean JSON representation.
+pprint(fn_decl.to_json_dict())
+
+{'description': 'Returns a * b.',
+ 'name': 'multiply',
+ 'parameters': {'properties': {'a': {'type': 'NUMBER'},
+                               'b': {'type': 'NUMBER'}},
+                'type': 'OBJECT'}}
+These JSON fields map to the equivalent fields on the Pydantic schema, and can be wrapped as a Tool.
+
+
+config = types.GenerateContentConfig(
+    tools=[types.Tool(function_declarations=[fn_decl])]
+)
+Here is a declaration for the same multiply function written using the genai.types classes. Note that these classes just describe the function for the API, they don't include an implementation of it, so this approach doesn't work with automatic function calling. However, it does allow you to define functions that aren't concrete Python functions (for example, to wrap a remote HTTP call), and gives you more control between function calls (for example, to change function_calling_config to follow a state graph).
+
+
+tool = types.Tool(function_declarations=[
+    types.FunctionDeclaration(
+        name="multiply",
+        description="Returns a * b.",
+        parameters=types.Schema(
+            properties={
+                'a': types.Schema(type='NUMBER'),
+                'b': types.Schema(type='NUMBER'),
+            },
+            type='OBJECT',
+        ),
+    )
+])
+assert tool.function_declarations[0] == fn_decl
+Extract structured data using function calling
+
+Try a Colab notebook
+View notebook on GitHub
+In this tutorial you'll work through a structured data extraction example, using the Gemini API to extract the lists of characters, relationships, things, and places from a story.
+
+Setup
+
+pip install -U -q google-generativeai
+
+import json
+import textwrap
+
+from google import genai
+from google.genai import types
+
+from IPython.display import JSON
+from IPython.display import display
+from IPython.display import Markdown
+
+
+def to_markdown(text):
+  text = text.replace('•', '  *')
+  return Markdown(textwrap.indent(text, '> ', predicate=lambda _: True))
+Once you have the API key, pass it to the SDK. You can do this in two ways:
+
+Put the key in the GOOGLE_API_KEY environment variable (the SDK will automatically pick it up from there).
+Pass the key to genai.Client(api_key=...)
+
+client = genai.Client(api_key=GOOGLE_API_KEY)
+The example task
+For this tutorial you'll extract entities from natural language stories. As an example, below is a story written by Gemini.
+
+
+MODEL_ID="gemini-2.0-flash"
+prompt = """
+Write a long story about a girl with magic backpack, her family, and at
+least one other character. Make sure everyone has names. Don't forget to
+describe the contents of the backpack, and where everyone and everything
+starts and ends up.
+"""
+
+response = client.models.generate_content(
+  model=MODEL_ID,
+  contents=prompt,    
+)
+story = response.text
+
+to_markdown(story)
+Elara was a wisp of a girl, all elbows and knees, with eyes the color of a stormy sea. She lived in the quiet town of Havenwood, nestled beside a whispering forest that everyone else ignored. Elara, however, heard its secrets. She was the only one who knew, for instance, that Mrs. Gable’s prize-winning roses were whispered gossip by the oak trees, or that the creek gurgled out old children’s songs.
+
+Elara’s most prized possession wasn't a listening ear, though. It was a simple, worn, leather backpack she’d found tucked away in the attic of her family’s old, creaky house. It looked ordinary enough, but it was anything but. This was no ordinary backpack, this was Elara's magic backpack.
+
+Inside, the backpack held wonders. Not jewels or gold, but things far more useful. There was a bottomless jar of honey that never emptied, perfect for soothing sore throats or making tea. A small, intricately carved wooden bird that, when released, could fly messages faster than the wind. A handful of shimmering, iridescent dust that could mend anything broken, from cracked pottery to hurt feelings. A compass that pointed not north, but towards what she needed most. And, her favorite, a small, leather-bound book filled with blank pages that would fill with the perfect story, poem, or spell whenever she needed one.
+
+Her parents, Arthur, a quiet carpenter with sawdust permanently clinging to his eyebrows, and Clara, a baker whose cinnamon rolls were legendary, knew about the backpack. They didn’t quite understand its magic, dismissing it as Elara's overactive imagination, but they loved her fiercely and tolerated the strange occurrences that sometimes followed her. They were good, steady people, content with their lives in Havenwood.
+
+One day, a new face arrived in Havenwood. A gruff, barrel-chested man named Silas, with eyes that held a glint of steel and a perpetual scowl etched onto his face. He bought the dilapidated old mill on the edge of town, a place everyone else avoided, claiming he wanted to restore it. But Elara felt a prickle of unease whenever he was near. The forest, usually a source of comfort, seemed to murmur warnings when Silas walked past.
+
+The first sign of trouble came when Clara’s cinnamon rolls started tasting…off. Bland, almost tasteless. Then Arthur’s woodworking projects began to crack and splinter, no matter how careful he was. The town, once vibrant and full of life, seemed to be losing its color, its joy.
+
+Elara knew, with a certainty that resonated deep in her bones, that Silas was the cause. She had seen him late one night, creeping towards the Whispering Woods, muttering strange incantations under the sickly glow of the moon. He was draining the magic from Havenwood, bit by bit.
+
+Determined to stop him, Elara turned to her backpack. She pulled out the compass. It spun wildly at first, confused, then settled, pointing not towards Silas directly, but towards the Whispering Woods. That was where she needed to go.
+
+Knowing she couldn't face Silas alone, Elara confided in Thomas, the town’s librarian. He was a kind, bookish man, often lost in the pages of ancient tomes. He initially dismissed her concerns as fantasy, but the desperation in her voice, the genuine fear in her eyes, convinced him to listen.
+
+Together, Elara and Thomas ventured into the Whispering Woods. The forest was different now, darker, quieter, the whispers almost hushed to silence. The air felt heavy, suffocating.
+
+Guided by the compass, they followed a winding path to a clearing where Silas stood before a twisted, gnarled oak. He was chanting, his voice a harsh, grating rasp, and around him, the air shimmered with stolen magic.
+
+“You can’t do this, Silas!” Elara called out, her voice trembling but firm.
+
+Silas turned, his eyes widening in surprise. “What’s this? A couple of meddling children? You have no idea what I'm doing. I'm freeing this town from its useless magic! It makes you weak, dependent!”
+
+“It makes us who we are!” Elara retorted, stepping forward. She reached into her backpack and pulled out the book. As she held it, the blank pages began to fill with words, weaving a tale of courage, resilience, and the power of community. It was a counter-spell, designed to restore the magic Silas was stealing.
+
+Silas lunged forward, trying to snatch the book, but Thomas, surprisingly agile for a librarian, stepped in his path. He might not have magic, but he had a lifetime of knowledge and a fierce protectiveness towards Havenwood.
+
+Elara began to read. Her voice, clear and strong, filled the clearing. As she read, the stolen magic began to flow back into the forest, into the town. The trees straightened, the air lightened, and the whispers returned, louder and more vibrant than before.
+
+Silas screamed, his face contorted with rage. The gnarled oak he was standing before began to crack and crumble, its stolen magic returning to its source.
+
+The book finished its tale, its pages returning to blankness. Silas collapsed, his power gone. He shrunk, both physically and spiritually, no longer the imposing figure that had terrorized Havenwood. He was just a small, bitter man, driven by resentment.
+
+He was eventually driven out of town, promising revenge that never came.
+
+Havenwood slowly returned to normal. Clara’s cinnamon rolls tasted sweeter than ever, Arthur’s woodworking was stronger and more beautiful, and the town buzzed with renewed energy.
+
+Elara, however, was changed. She was no longer just a wisp of a girl. She was a protector, a guardian of Havenwood. She continued to carry her magic backpack, exploring the forest, listening to its secrets, and always ready to defend her home.
+
+Thomas, inspired by his adventure, started a community garden, using his newfound knowledge of plants and herbs to bring beauty and healing to the town. He became a silent hero, not seeking praise, but finding satisfaction in helping others.
+
+Elara's parents, though still a little bewildered by the whole ordeal, understood the importance of her magic and the role it played in their lives. Arthur even built a special shelf for her backpack, right beside the fireplace, a symbol of its importance to the family.
+
+And so, Elara and her magic backpack remained in Havenwood, a silent guardian, always listening, always protecting, her life intertwined with the whispers of the forest and the love of her family and friends. She had saved her home, not with brute force, but with kindness, courage, and the enduring power of a magical backpack.
+
+Using Natural language
+Large language models are powerful multitasking tools. Often, you can just ask Gemini for what you want, and it will do okay.
+
+The Gemini API doesn't have a JSON mode, so there are a few things to watch for when generating data structures this way:
+
+Sometimes parsing fails.
+The schema can't be strictly enforced.
+You'll solve those problems in the next section. First, try a simple natural language prompt with the schema written out as text. This has not been optimized:
+
+
+MODEL_ID="gemini-2.0-flash"
+prompt = """
+Please return JSON describing the people, places, things and relationships from this story using the following schema:
+
+{"people": list[PERSON], "places":list[PLACE], "things":list[THING], "relationships": list[RELATIONSHIP]}
+
+PERSON = {"name": str, "description": str, "start_place_name": str, "end_place_name": str}
+PLACE = {"name": str, "description": str}
+THING = {"name": str, "description": str, "start_place_name": str, "end_place_name": str}
+RELATIONSHIP = {"person_1_name": str, "person_2_name": str, "relationship": str}
+
+All fields are required.
+
+Important: Only return a single piece of valid JSON text.
+
+Here is the story:
+
+""" + story
+
+response = client.models.generate_content(
+  model=MODEL_ID,
+  contents=prompt,
+  config=types.GenerateContentConfig(
+    response_mime_type="application/json"
+  ),
+)
+That returned a json string. Try parsing it:
+
+
+import json
+
+print(json.dumps(json.loads(response.text), indent=4))
+
+{
+    "people": [
+        {
+            "name": "Elara",
+            "description": "A wisp of a girl with eyes the color of a stormy sea, who can hear the forest's secrets.",
+            "start_place_name": "Havenwood",
+            "end_place_name": "Havenwood"
+        },
+        {
+            "name": "Arthur",
+            "description": "Elara's father, a quiet carpenter with sawdust permanently clinging to his eyebrows.",
+            "start_place_name": "Havenwood",
+            "end_place_name": "Havenwood"
+        },
+        {
+            "name": "Clara",
+            "description": "Elara's mother, a baker whose cinnamon rolls were legendary.",
+            "start_place_name": "Havenwood",
+            "end_place_name": "Havenwood"
+        },
+        {
+            "name": "Silas",
+            "description": "A gruff, barrel-chested man with a glint of steel in his eyes who wanted to drain the magic from Havenwood.",
+            "start_place_name": "Havenwood",
+            "end_place_name": "Havenwood"
+        },
+        {
+            "name": "Thomas",
+            "description": "The town\u2019s librarian, a kind, bookish man.",
+            "start_place_name": "Havenwood",
+            "end_place_name": "Havenwood"
+        }
+    ],
+    "places": [
+        {
+            "name": "Havenwood",
+            "description": "A quiet town nestled beside a whispering forest."
+        },
+        {
+            "name": "Whispering Woods",
+            "description": "A forest beside Havenwood that murmurs secrets."
+        },
+        {
+            "name": "Old Mill",
+            "description": "A dilapidated old mill on the edge of Havenwood."
+        }
+    ],
+    "things": [
+        {
+            "name": "Magic Backpack",
+            "description": "A simple, worn, leather backpack that holds magical items.",
+            "start_place_name": "Elara's House",
+            "end_place_name": "Havenwood"
+        },
+        {
+            "name": "Honey Jar",
+            "description": "A bottomless jar of honey.",
+            "start_place_name": "Magic Backpack",
+            "end_place_name": "Magic Backpack"
+        },
+        {
+            "name": "Wooden Bird",
+            "description": "A small, intricately carved wooden bird that can fly messages.",
+            "start_place_name": "Magic Backpack",
+            "end_place_name": "Magic Backpack"
+        },
+        {
+            "name": "Iridescent Dust",
+            "description": "Shimmering dust that can mend anything broken.",
+            "start_place_name": "Magic Backpack",
+            "end_place_name": "Magic Backpack"
+        },
+        {
+            "name": "Compass",
+            "description": "A compass that points towards what is needed most.",
+            "start_place_name": "Magic Backpack",
+            "end_place_name": "Magic Backpack"
+        },
+        {
+            "name": "Leather-bound Book",
+            "description": "A small, leather-bound book filled with blank pages that fill with the perfect story, poem, or spell whenever needed.",
+            "start_place_name": "Magic Backpack",
+            "end_place_name": "Magic Backpack"
+        },
+        {
+            "name": "Cinnamon Rolls",
+            "description": "Legendary cinnamon rolls made by Clara.",
+            "start_place_name": "Havenwood",
+            "end_place_name": "Havenwood"
+        }
+    ],
+    "relationships": [
+        {
+            "person_1_name": "Elara",
+            "person_2_name": "Arthur",
+            "relationship": "Daughter-Father"
+        },
+        {
+            "person_1_name": "Elara",
+            "person_2_name": "Clara",
+            "relationship": "Daughter-Mother"
+        },
+        {
+            "person_1_name": "Elara",
+            "person_2_name": "Thomas",
+            "relationship": "Friends"
+        },
+        {
+            "person_1_name": "Elara",
+            "person_2_name": "Silas",
+            "relationship": "Adversaries"
+        },
+        {
+            "person_1_name": "Arthur",
+            "person_2_name": "Clara",
+            "relationship": "Spouses"
+        }
+    ]
+}
+That's relatively simple and often works, but you can potentially make this more strict/robust by defining the schema using the API's function calling feature.
+
+Use function calling
+If you haven't gone through the Function calling basics tutorial yet, make sure you do that first.
+
+With function calling your function and its parameters are described to the API as a genai.protos.FunctionDeclaration. In basic cases the SDK can build the FunctionDeclaration from the function and its annotations. So you'll need to define them explicitly, for now.
+
+Define the schema
+Start by defining person as an object with string fields name, description, start_place_name, end_place_name.
+
+
+Person = {
+    
+    "type": "OBJECT",
+    "properties": {
+        "character_name": {
+            "type": "STRING",
+            "description": "Character name",
+        },
+        "character_description": {
+            "type": "STRING",
+            "description": "Character description",
+        }
+    },
+    "required": ["character_name", "character_description"]
+}
+Then do the same for each of the entities you're trying to extract:
+
+
+Relationships = {
+    "type": "OBJECT",
+    "properties": {
+        "first_character": {
+            "type": "STRING",
+            "description": "First character name",
+        },
+        "second_character": {
+            "type": "STRING",
+            "description": "Second character name",
+        },
+        "relationship": {
+            "type": "STRING",
+            "description": "Familiar elationship between first and second character",
+        }
+    },
+    "required": ["first_character", "second_character", "relationship"]
+}
+
+Places = {
+    "type": "OBJECT",
+    "properties": {
+        "place_name": {
+            "type": "STRING",
+            "description": "Place name",
+        },
+        "place_description": {
+            "type": "STRING",
+            "description": "Place description",
+        }
+    },
+    "required": ["place_name", "place_description"]
+}
+
+Things = {
+    "type": "OBJECT",
+    "properties": {
+        "thing_name": {
+            "type": "STRING",
+            "description": "Thing name",
+        },
+        "thing_description": {
+            "type": "STRING",
+            "description": "Thing description",
+        }
+    },
+    "required": ["thing_name", "thing_description"]
+}
+Now build the FunctionDeclaration:
+
+
+get_people = types.FunctionDeclaration(
+    name="get_people",
+    description="Get information about characters",
+    parameters=Person,
+)
+
+get_relationships = types.FunctionDeclaration(
+    name="get_relationships",
+    description="Get information about relationships between people",
+    parameters=Relationships
+)
+
+get_places = types.FunctionDeclaration(
+    name="get_places",
+    description="Get information about places",
+    parameters=Places
+)
+
+get_things = types.FunctionDeclaration(
+    name="get_things",
+    description="Get information about things",
+    parameters=Things
+)
+
+story_tools = types.Tool(
+    function_declarations=[get_people, get_relationships, get_places, get_things],
+)
+Call the API
+Like you saw in Function calling basics now you can pass this FunctionDeclaration to the tools argument of the genai.GenerativeModel constructor (the constructor would also accept an equivalent JSON representation of the function declaration):
+
+
+MODEL_ID="gemini-2.0-flash"
+prompt = f"""
+{story}
+
+Please add the people, places, things, and relationships from this story to the database
+"""
+
+result = client.models.generate_content(
+    model=MODEL_ID,
+    contents=prompt,
+    config=types.GenerateContentConfig(
+        tools=[story_tools],
+        temperature=0
+        )
+)
+Now there is no text to parse. The result is a datastructure.
+
+
+print(result.candidates[0].content.parts[0].text)
+
+None
+
+result.candidates[0].content.parts[0].function_call
+
+FunctionCall(id=None, args={'character_name': 'Elara', 'character_description': 'a wisp of a girl, all elbows and knees, with eyes the color of a stormy sea'}, name='get_people')
+
+fc = result.candidates[0].content.parts[0].function_call
+print(type(fc))
+
+<class 'google.genai.types.FunctionCall'>
+The genai.protos.FunctionCall class is based on Google Protocol Buffers, convert it to a more familiar JSON compatible object:
+
+
+for part in result.candidates[0].content.parts:
+  print(json.dumps(part.function_call.args, indent=4))
+
+{
+    "character_name": "Elara",
+    "character_description": "a wisp of a girl, all elbows and knees, with eyes the color of a stormy sea"
+}
+{
+    "character_name": "Arthur",
+    "character_description": "a quiet carpenter with sawdust permanently clinging to his eyebrows, Elara's father"
+}
+{
+    "character_description": "a baker whose cinnamon rolls were legendary, Elara's mother",
+    "character_name": "Clara"
+}
+{
+    "character_description": "a gruff, barrel-chested man with eyes that held a glint of steel and a perpetual scowl etched onto his face",
+    "character_name": "Silas"
+}
+{
+    "character_description": "the town\u2019s librarian, a kind, bookish man, often lost in the pages of ancient tomes",
+    "character_name": "Thomas"
+}
+{
+    "place_name": "Havenwood",
+    "place_description": "a quiet town, nestled beside a whispering forest"
+}
+{
+    "place_description": "a forest near Havenwood",
+    "place_name": "the Whispering Woods"
+}
+{
+    "place_description": "a dilapidated old mill on the edge of town",
+    "place_name": "the old mill"
+}
+{
+    "thing_name": "Elara's magic backpack",
+    "thing_description": "a simple, worn, leather backpack that held wonders"
+}
+{
+    "thing_description": "never emptied, perfect for soothing sore throats or making tea",
+    "thing_name": "a bottomless jar of honey"
+}
+{
+    "thing_description": "when released, could fly messages faster than the wind",
+    "thing_name": "a small, intricately carved wooden bird"
+}
+{
+    "thing_name": "a handful of shimmering, iridescent dust",
+    "thing_description": "could mend anything broken, from cracked pottery to hurt feelings"
+}
+{
+    "thing_name": "a compass",
+    "thing_description": "pointed not north, but towards what she needed most"
+}
+{
+    "thing_description": "filled with blank pages that would fill with the perfect story, poem, or spell whenever she needed one",
+    "thing_name": "a small, leather-bound book"
+}
+{
+    "first_character": "Elara",
+    "relationship": "father",
+    "second_character": "Arthur"
+}
+{
+    "relationship": "mother",
+    "second_character": "Clara",
+    "first_character": "Elara"
+}
+Conclusion
+While the API can handle structured data extraction problems with pure text input and text output, using function calling is likely more reliable since it lets you define a strict schema, and eliminates a potentially error-prone parsing step.
